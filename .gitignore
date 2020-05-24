@@ -1,0 +1,6 @@
+*.DS_Store
+*pycache
+*.pyc
+*.local
+*.pytest*
+*.vscode
