@@ -4,3 +4,6 @@
 *.local
 *.pytest*
 *.vscode
+*.yml
+*.ipynb
+*.h5
