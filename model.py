@@ -8,7 +8,7 @@ from sklearn.metrics import precision_recall_fscore_support
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 
 def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=128,
-                    saved_model_name='best_model.h5', previous_model_to_train=None):
+                    saved_model_name='best_model.h5', previous_model=None):
     """
     Parameters:
     ----------
@@ -24,11 +24,11 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
         Model to be used on frequency-time data
     """
 
-    if previous_model_to_train is not None:
-        print("Loading in previous model: " + previous_model_to_train)
-        cnn_2d = load_model(previous_model_to_train, compile=False)
+    if previous_model is not None:
+        print("Loading in previous model: " + previous_model)
+        cnn_2d = load_model(previous_model, compile=False)
     else:
-        cnn_2d = Sequential()
+        cnn_2d = Sequential(name=saved_model_name)
 
         # create num_filters convolution filters, each of size 3x3
         cnn_2d.add(Conv2D(num_filters, (3, 3), padding='same', input_shape=(None, None, 1), name='conv2d_1'))
@@ -59,14 +59,5 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
 
     # optimize using Adam
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-    # save model with lowest validation loss
-    loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)
-
-    # cut learning rate in half if validation loss doesn't improve in 5 epochs
-    reduce_lr_callback = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
-
-    # stop training if validation loss doesn't improve after 15 epochs
-    early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
 
     return cnn_2d
