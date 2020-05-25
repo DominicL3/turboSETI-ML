@@ -1,4 +1,5 @@
 import numpy as np
+import numba # speed up NumPy
 import tqdm
 
 """
@@ -113,7 +114,57 @@ def scale_data_numba(ftdata):
 
         ftdata[chunk_idx] = rescaled_chunk
 
+def train_val_split(ftdata, labels, split_fraction):
+    """Split ftdata and labels into training and validation sets."""
+    NTRAIN = int(len(ftdata) * split_fraction) # split_fraction defines what proportion is training set
+
+    ind = np.arange(len(ftdata))
+    np.random.shuffle(ind)
+
+    # split indices into training and evaluation set
+    ind_train = ind[:NTRAIN]
+    ind_val = ind[NTRAIN:]
+
+    # split examples into training and test set based on randomized indices
+    train_ftdata, val_ftdata = ftdata[ind_train], ftdata[ind_val]
+    train_labels, val_labels = labels[ind_train], labels[ind_val]
+
+    return train_ftdata, train_labels, val_ftdata, val_labels
+
+@numba.njit(parallel=True)
+def train_val_split_numba(ftdata, labels, split_fraction):
+    """Literally the same function as train_val_split, but
+    runs with Numba for speed optimizations."""
+
+    NTRAIN = int(len(ftdata) * split_fraction) # split_fraction defines what proportion is training set
+
+    ind = np.arange(len(ftdata))
+    np.random.shuffle(ind)
+
+    # split indices into training and evaluation set
+    ind_train = ind[:NTRAIN]
+    ind_val = ind[NTRAIN:]
+
+    # split examples into training and test set based on randomized indices
+    train_ftdata, val_ftdata = ftdata[ind_train], ftdata[ind_val]
+    train_labels, val_labels = labels[ind_train], labels[ind_val]
+
+    return train_ftdata, train_labels, val_ftdata, val_labels
+
 def get_classification_results(y_true, y_pred):
+    """ Take true labels (y_true) and model-predicted
+    label (y_pred) for a binary classifier, and return
+    true_positives, false_positives, true_negatives, false_negatives
+    """
+    true_positives = np.where((y_true == 1) & (y_pred >= 0.5))[0]
+    false_positives = np.where((y_true == 0) & (y_pred >= 0.5))[0]
+    true_negatives = np.where((y_true == 0) & (y_pred < 0.5))[0]
+    false_negatives = np.where((y_true == 1) & (y_pred < 0.5))[0]
+
+    return true_positives, false_positives, true_negatives, false_negatives
+
+@numba.njit(parallel=True)
+def get_classification_results_numba(y_true, y_pred):
     """ Take true labels (y_true) and model-predicted
     label (y_pred) for a binary classifier, and return
     true_positives, false_positives, true_negatives, false_negatives
@@ -168,3 +219,59 @@ def print_metric(y_true, y_pred):
     print("fscore: %f" % fscore)
 
     return accuracy, precision, recall, fscore, conf_mat
+
+def plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name, enable_numba=True):
+    pred_labels = np.round(pred_probs)
+    # print out scores of various metrics
+    accuracy, precision, recall, fscore, conf_mat = utils.print_metric(eval_labels, pred_labels)
+
+    if enable_numba:
+        TP, FP, TN, FN = utils.get_classification_results_numba(val_labels, pred_labels)
+    else:
+        TP, FP, TN, FN = utils.get_classification_results(val_labels, pred_labels)
+
+    # get lowest confidence selection for each category
+    if TP.size:
+        TPind = TP[np.argmin(pred_probs[TP])]  # Min probability True positive candidate
+        TPdata = val_ftdata[..., 0][TPind]
+    else:
+        TPdata = np.zeros((NFREQ, NTIME))
+
+    if FP.size:
+        FPind = FP[np.argmax(pred_probs[FP])]  # Max probability False positive candidate
+        FPdata = val_ftdata[..., 0][FPind]
+    else:
+        FPdata = np.zeros((NFREQ, NTIME))
+
+    if FN.size:
+        FNind = FN[np.argmax(pred_probs[FN])]  # Max probability False negative candidate
+        FNdata = val_ftdata[..., 0][FNind]
+    else:
+        FNdata = np.zeros((NFREQ, NTIME))
+
+    if TN.size:
+        TNind = TN[np.argmin(pred_probs[TN])]  # Min probability True negative candidate
+        TNdata = val_ftdata[..., 0][TNind]
+    else:
+        TNdata = np.zeros((NFREQ, NTIME))
+
+    # plot the confusion matrix and display
+    plt.ioff()
+    plt.subplot(221)
+    plt.gca().set_title('TP: {}'.format(conf_mat[0][0]))
+    plt.imshow(TPdata, aspect='auto', interpolation='none')
+    plt.subplot(222)
+    plt.gca().set_title('FP: {}'.format(conf_mat[0][1]))
+    plt.imshow(FPdata, aspect='auto', interpolation='none')
+    plt.subplot(223)
+    plt.gca().set_title('FN: {}'.format(conf_mat[1][0]))
+    plt.imshow(FNdata, aspect='auto', interpolation='none')
+    plt.subplot(224)
+    plt.gca().set_title('TN: {}'.format(conf_mat[1][1]))
+    plt.imshow(TNdata, aspect='auto', interpolation='none')
+    plt.tight_layout()
+
+    # save data, show plot
+    print("Saving confusion matrix to {}".format(confusion_matrix_name))
+    plt.savefig(confusion_matrix_name, dpi=100)
+    plt.show()
