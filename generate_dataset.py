@@ -66,7 +66,12 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
     # sample files that follow regex pattern of path_to_files
     # so path_to_files = './*0000.fil' would sample all files
     # in current directory that end in 0000.fil
-    files = glob.glob(path_to_files)
+    if isinstance(path_to_files, list):
+        files = path_to_files
+    elif isinstance(path_to_files, str):
+        files = glob.glob(path_to_files)
+    else:
+        raise ValueError(f"path_to_files should be list or str type, not {type(path_to_files)}.")
 
     print("Total number of files to possibly sample from: %d" % len(files))
 
@@ -121,7 +126,7 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
 if __name__ == "__main__":
     # Read command line arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('path_to_files', type=str, help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
+    parser.add_argument('path_to_files', nargs='+', type=str, help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
 
     parser.add_argument('-total', '--total_samples', type=int, default=1000, help='Total number of samples to generate')
     parser.add_argument('-spf', '--samples_per_file', type=int, default=50,
@@ -161,4 +166,4 @@ if __name__ == "__main__":
 
     # save final array to disk
     print("Saving data to " + save_name)
-    np.save(save_name, frames=training_frames)
+    np.save(save_name, training_frames)
