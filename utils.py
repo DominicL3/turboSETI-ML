@@ -225,7 +225,7 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
     pred_labels = np.round(pred_probs)
     # print out scores of various metrics
     accuracy, precision, recall, fscore, conf_mat = print_metric(val_labels, pred_labels)
-    ftdata_shape = val_ftdata[0].shape
+    ftdata_shape = val_ftdata[0, :, :, 0].shape
 
     if enable_numba:
         TP, FP, TN, FN = get_classification_results_numba(val_labels, pred_labels)
@@ -259,20 +259,6 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
 
     # plot the confusion matrix and display
     plt.ion()
-    """plt.subplot(221)
-    plt.gca().set_title('TP: {}'.format(conf_mat[0][0]))
-    plt.imshow(TPdata, aspect='auto', interpolation='none')
-    plt.subplot(222)
-    plt.gca().set_title('FP: {}'.format(conf_mat[0][1]))
-    plt.imshow(FPdata, aspect='auto', interpolation='none')
-    plt.subplot(223)
-    plt.gca().set_title('FN: {}'.format(conf_mat[1][0]))
-    plt.imshow(FNdata, aspect='auto', interpolation='none')
-    plt.subplot(224)
-    plt.gca().set_title('TN: {}'.format(conf_mat[1][1]))
-    plt.imshow(TNdata, aspect='auto', interpolation='none')
-    plt.tight_layout()
-    plt.show()"""
 
     conf_mat = conf_mat.flatten()
     names = ['TP', 'FP', 'FN', 'TN']
@@ -281,7 +267,7 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
     fig_confusion, ax_confusion = plt.subplots(nrows=2, ncols=2)
     for num_samples, name, data, ax in zip(conf_mat, names, confusion_data, ax_confusion.flatten()):
         ax.imshow(data, aspect='auto')
-        ax.set_title(f'{name}; {num_samples}')
+        ax.set_title(f'{name}: {num_samples}')
 
     fig_confusion.tight_layout()
     fig_confusion.show()
