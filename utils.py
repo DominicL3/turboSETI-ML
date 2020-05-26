@@ -270,8 +270,9 @@ def plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name, enable_
     plt.gca().set_title('TN: {}'.format(conf_mat[1][1]))
     plt.imshow(TNdata, aspect='auto', interpolation='none')
     plt.tight_layout()
-
-    # save data, show plot
-    print("Saving confusion matrix to {}".format(confusion_matrix_name))
-    plt.savefig(confusion_matrix_name, dpi=100)
     plt.show()
+
+    # save plot to disk
+    if confusion_matrix_name is not None:
+        print("Saving confusion matrix to {}".format(confusion_matrix_name))
+        plt.savefig(confusion_matrix_name, dpi=100)
