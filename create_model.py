@@ -1,7 +1,4 @@
 import numpy as np
-import matplotlib.pyplot as plt
-
-import utils
 
 from time import time
 import os, argparse
@@ -10,7 +7,7 @@ import os, argparse
 from tensorflow.keras.models import load_model
 from model import construct_conv2d, fit_model
 
-import generate_dataset # make training set
+import generate_dataset, utils # make training set
 
 """
 Train a Keras model to do binary classification on simulated pulses
@@ -230,5 +227,5 @@ if __name__ == "__main__":
     model = load_model(saved_model_name, compile=True)
     pred_probs = model.predict(val_ftdata, verbose=1)[:, 0]
 
-    utils.plot_confusion_matrix(val_labels, pred_probs, args.confusion_matrix,
-                                enable_numba=args.enable_numba)
+    utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs,
+                                args.confusion_matrix, enable_numba=args.enable_numba)
