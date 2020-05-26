@@ -1,5 +1,6 @@
 import numpy as np
 
+from tqdm import tqdm
 from time import time
 import os, argparse
 
@@ -63,7 +64,8 @@ def make_labels(training_frames):
     ftdata = np.zeros([len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
 
     # add pulses to frames only on odd-numbered samples
-    for sample_number, frame in enumerate(training_frames):
+    print("Simulating pulses in training backgrounds")
+    for sample_number, frame in enumerate(tqdm(training_frames)):
         if sample_number % 2 == 0:
             # add blank observation to training set
             simulate_pulse(frame, add_to_frame=False)
@@ -84,7 +86,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     ### SIMULATION PARAMETERS ###
-    parser.add_argument('-p', '--path_to_files', default=None, type=str,
+    parser.add_argument('-p', '--path_to_files', nargs='+', type=str,
                         help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
 
     parser.add_argument('-total', '--total_samples', type=int, default=1000, help='Total number of samples to generate')
