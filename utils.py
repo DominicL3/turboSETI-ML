@@ -223,12 +223,12 @@ def print_metric(y_true, y_pred):
 def plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name, enable_numba=True):
     pred_labels = np.round(pred_probs)
     # print out scores of various metrics
-    accuracy, precision, recall, fscore, conf_mat = utils.print_metric(eval_labels, pred_labels)
+    accuracy, precision, recall, fscore, conf_mat = print_metric(eval_labels, pred_labels)
 
     if enable_numba:
-        TP, FP, TN, FN = utils.get_classification_results_numba(val_labels, pred_labels)
+        TP, FP, TN, FN = get_classification_results_numba(val_labels, pred_labels)
     else:
-        TP, FP, TN, FN = utils.get_classification_results(val_labels, pred_labels)
+        TP, FP, TN, FN = get_classification_results(val_labels, pred_labels)
 
     # get lowest confidence selection for each category
     if TP.size:
