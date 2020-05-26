@@ -141,7 +141,7 @@ if __name__ == "__main__":
                         help='Path to previous model, will be trained on new simulated data.')
     parser.add_argument('-s', '--save_model', dest='best_model_file', type=str,
                         default='./best_model.h5', help='Filename/path to save best model')
-    parser.add_argument('--confusion', dest='conf_mat', type=str,
+    parser.add_argument('-confusion', '--confusion_matrix', type=str,
                         default=None, help='Filename to store final confusion matrix')
     parser.add_argument('--disable_numba', dest='enable_numba', action='store_false',
                         help='Disable numba speed optimizations')
@@ -180,7 +180,6 @@ if __name__ == "__main__":
             print("Saving training set to " + training_set_name)
             np.save(training_set_name, training_frames)
 
-
     ftdata, labels = make_labels(training_frames)
 
     if args.enable_numba: # use numba-accelerated functions
@@ -203,6 +202,8 @@ if __name__ == "__main__":
         train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split(ftdata, labels, args.train_val_split)
         print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
 
+    ftdata = None; del ftdata # free memory by deleting potentially huge array
+
     # disable file locking to save NN models
     os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
@@ -212,7 +213,6 @@ if __name__ == "__main__":
                                 saved_model_name=saved_model_name, previous_model=previous_model)
     print(model.summary())
 
-    print("\nTraining model with input data...")
     start_time = time() # training time
 
     # add channel dimension for Keras tensors (1 channel)
@@ -223,11 +223,12 @@ if __name__ == "__main__":
                 saved_model_name=saved_model_name, weight_signal=args.weight_signal,
                 batch_size=args.batch_size, epochs=args.epochs)
 
-    print(f"Training on {len(train_labels)} samples took {np.round((time() - start_time) / 60, 2)} minutes")
+    print(f"\nTraining and validating on {len(labels)} samples took {np.round((time() - start_time) / 60, 2)} minutes")
 
-    # load the best model saved to test out confusion matrix
+    # load the best model saved to generate confusion matrix
+    print("Evaluating on validation set to generate confusion matrix...")
     model = load_model(saved_model_name, compile=True)
     pred_probs = model.predict(val_ftdata, verbose=1)[:, 0]
 
-    utils.plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name,
-                                enable_numba=enable_numba)
+    utils.plot_confusion_matrix(val_labels, pred_probs, args.confusion_matrix,
+                                enable_numba=args.enable_numba)
