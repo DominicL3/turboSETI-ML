@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import numba # speed up NumPy
 import tqdm
 
@@ -220,10 +221,11 @@ def print_metric(y_true, y_pred):
 
     return accuracy, precision, recall, fscore, conf_mat
 
-def plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name, enable_numba=True):
+def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_name, enable_numba=True):
     pred_labels = np.round(pred_probs)
     # print out scores of various metrics
-    accuracy, precision, recall, fscore, conf_mat = print_metric(eval_labels, pred_labels)
+    accuracy, precision, recall, fscore, conf_mat = print_metric(val_labels, pred_labels)
+    ftdata_shape = val_ftdata[0].shape
 
     if enable_numba:
         TP, FP, TN, FN = get_classification_results_numba(val_labels, pred_labels)
@@ -235,29 +237,29 @@ def plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name, enable_
         TPind = TP[np.argmin(pred_probs[TP])]  # Min probability True positive candidate
         TPdata = val_ftdata[..., 0][TPind]
     else:
-        TPdata = np.zeros((NFREQ, NTIME))
+        TPdata = np.zeros(ftdata_shape)
 
     if FP.size:
         FPind = FP[np.argmax(pred_probs[FP])]  # Max probability False positive candidate
         FPdata = val_ftdata[..., 0][FPind]
     else:
-        FPdata = np.zeros((NFREQ, NTIME))
+        FPdata = np.zeros(ftdata_shape)
 
     if FN.size:
         FNind = FN[np.argmax(pred_probs[FN])]  # Max probability False negative candidate
         FNdata = val_ftdata[..., 0][FNind]
     else:
-        FNdata = np.zeros((NFREQ, NTIME))
+        FNdata = np.zeros(ftdata_shape)
 
     if TN.size:
         TNind = TN[np.argmin(pred_probs[TN])]  # Min probability True negative candidate
         TNdata = val_ftdata[..., 0][TNind]
     else:
-        TNdata = np.zeros((NFREQ, NTIME))
+        TNdata = np.zeros(ftdata_shape)
 
     # plot the confusion matrix and display
-    plt.ioff()
-    plt.subplot(221)
+    plt.ion()
+    """plt.subplot(221)
     plt.gca().set_title('TP: {}'.format(conf_mat[0][0]))
     plt.imshow(TPdata, aspect='auto', interpolation='none')
     plt.subplot(222)
@@ -270,9 +272,21 @@ def plot_confusion_matrix(val_labels, pred_probs, confusion_matrix_name, enable_
     plt.gca().set_title('TN: {}'.format(conf_mat[1][1]))
     plt.imshow(TNdata, aspect='auto', interpolation='none')
     plt.tight_layout()
-    plt.show()
+    plt.show()"""
+
+    conf_mat = conf_mat.flatten()
+    names = ['TP', 'FP', 'FN', 'TN']
+    confusion_data = [TPdata, FPdata, FNdata, TNdata]
+
+    fig_confusion, ax_confusion = plt.subplots(nrows=2, ncols=2)
+    for num_samples, name, data, ax in zip(conf_mat, names, confusion_data, ax_confusion.flatten()):
+        ax.imshow(data, aspect='auto')
+        ax.set_title(f'{name}; {num_samples}')
+
+    fig_confusion.tight_layout()
+    fig_confusion.show()
 
     # save plot to disk
     if confusion_matrix_name is not None:
         print("Saving confusion matrix to {}".format(confusion_matrix_name))
-        plt.savefig(confusion_matrix_name, dpi=100)
+        fig_confusion.savefig(confusion_matrix_name, dpi=100)
