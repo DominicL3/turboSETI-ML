@@ -1,4 +1,7 @@
 # neural net imports
+import tensorflow
+tensorflow.compat.v1.disable_eager_execution()
+
 from tensorflow.keras.models import Sequential, load_model
 from tensorflow.keras.layers import Activation, Dense, Dropout
 from tensorflow.keras.layers import Conv2D, BatchNormalization
@@ -37,7 +40,7 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
         cnn_2d.add(MaxPooling2D(pool_size=(2, 2), name='max_pool_1')) # max pool to reduce the dimensionality
 
         # repeat and double the filter size for each convolutional block to make this DEEP
-        for layer_number in np.arange(2, num_conv_layers + 1):
+        for layer_number in range(2, num_conv_layers + 1):
             num_filters *= 2
             cnn_2d.add(Conv2D(num_filters, (3, 3), padding='same', name=f'conv2d_{layer_number}'))
             cnn_2d.add(BatchNormalization(name=f'batch_norm_{layer_number}'))
@@ -57,7 +60,27 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
         # predict what the label should be
         pred_layer = cnn_2d.add(Dense(1, activation='sigmoid', name='sigmoid_output'))
 
-    # optimize using Adam
+    return cnn_2d
+
+def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
+                saved_model_name='best_model.h5', weight_signal=1.0,
+                batch_size=32, epochs=32):
+    """Fit a model using the given training data and labels while
+    validating each epoch. Continually save the model that improves
+    on the best val_loss."""
+
+    # compile model and optimize using Adam
     model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
 
-    return cnn_2d
+    # save model with lowest validation loss
+    loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)
+
+    # cut learning rate in half if validation loss doesn't improve in 5 epochs
+    reduce_lr_callback = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
+
+    # stop training if validation loss doesn't improve after 15 epochs
+    early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
+
+    model.fit(x=train_ftdata, y=train_labels, validation_data=(val_ftdata, val_labels),
+                class_weight={0: 1, 1: weight_signal}, batch_size=batch_size,
+                epochs=epochs, callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
