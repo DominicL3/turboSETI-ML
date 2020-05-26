@@ -83,4 +83,5 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
 
     model.fit(x=train_ftdata, y=train_labels, validation_data=(val_ftdata, val_labels),
                 class_weight={0: 1, 1: weight_signal}, batch_size=batch_size,
-                epochs=epochs, callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
+                epochs=epochs, use_multiprocessing=True,
+                callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
