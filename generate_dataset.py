@@ -73,7 +73,8 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
     else:
         raise ValueError(f"path_to_files should be list or str type, not {type(path_to_files)}.")
 
-    print("Total number of files to possibly sample from: %d" % len(files))
+    print(f"Total number of files to possibly sample from: {len(files)}")
+    print(f"Total number of samples to get: {total_samples}")
 
     if not files:
         raise ValueError(f"No files found with path {path_to_files}")
@@ -106,7 +107,7 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
 
         # pick a random filterbank file from directory
         rand_filename = random_files[i]
-        print("\nSampling file: " + str(rand_filename))
+        print(f"\nSampling file ({i}/{len(files)}): " + str(rand_filename))
 
         # get information and append to growing list of samples
         extract_frames(fname=rand_filename, training_frames=training_frames,
@@ -145,7 +146,7 @@ if __name__ == "__main__":
                         help='Max amount of time (seconds) to sample from files before duplicating')
 
     # save training set
-    parser.add_argument('-s', '--save_name', type=str, default='training_set.npz',
+    parser.add_argument('-s', '--save_name', type=str, default='training_set.npy',
                         help='Filename to save training set')
 
     args = parser.parse_args()
