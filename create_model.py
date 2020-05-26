@@ -1,21 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-import setigen as stg
-from blimpy import Waterfall
 import utils
 
-from tqdm import tqdm
 from time import time
-import os, sys
-import copy
-import numba # speed up NumPy
+import os, argparse
 
 # neural net imports
 from tensorflow.keras.models import load_model
-from model import construct_conv2d
+from model import construct_conv2d, fit_model
 
-import generate_training_set # make training set
+import generate_dataset # make training set
 
 """
 Train a Keras model to do binary classification on simulated pulses
@@ -68,7 +63,7 @@ def make_labels(training_frames):
     print(f'Number of time bins per sample: {tchans}')
     print('\n')
 
-    ftdata = np.zeros(len(training_frames), tchans, fchans, dtype=f0.get_data().dtype)
+    ftdata = np.zeros([len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
 
     # add pulses to frames only on odd-numbered samples
     for sample_number, frame in enumerate(training_frames):
@@ -91,7 +86,7 @@ if __name__ == "__main__":
     # Read command line arguments
     parser = argparse.ArgumentParser()
 
-    ### Simulation parameters ###
+    ### SIMULATION PARAMETERS ###
     parser.add_argument('-p', '--path_to_files', default=None, type=str,
                         help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
 
@@ -116,38 +111,40 @@ if __name__ == "__main__":
                         help='Filename to save training set')
 
     # load in previously created training set
-    parser.add_argument('-l', '--load_training', dest='saved_training_set', type=str, default=None,
+    parser.add_argument('-l', '--load_training', type=str, default=None,
                         help='Filename to load previously created training set (.npy file)')
 
-    ### Model parameters ###
+    ### MODEL PARAMETERS ###
     # parameters for convolutional layers
-    parser.add_argument('--num_conv_layers', type=int, default=3, help='Number of convolutional layers to train with. Careful when setting this,\
-                        the dimensionality of the image is reduced by half with each layer and will error out if there are too many!')
-    parser.add_argument('--num_filters', type=int, default=32,
+    parser.add_argument('-conv', '--num_conv_layers', type=int, default=3, help='Number of convolutional layers to train with.')
+    parser.add_argument('-filt', '--num_filters', type=int, default=32,
                         help='Number of filters in starting convolutional layer, doubles with every convolutional block')
 
     # parameters for dense layers
-    parser.add_argument('--n_dense1', type=int, default=256, help='Number of neurons in first dense layer')
-    parser.add_argument('--n_dense2', type=int, default=128, help='Number of neurons in second dense layer')
+    parser.add_argument('-d1', '--n_dense1', type=int, default=256, help='Number of neurons in first dense layer')
+    parser.add_argument('-d2', '--n_dense2', type=int, default=128, help='Number of neurons in second dense layer')
 
     # parameters for signal-to-noise ratio of FRB
     parser.add_argument('--SNRmin', type=float, default=8.0, help='Minimum SNR for FRB signal')
     parser.add_argument('--SNR_sigma', type=float, default=1.0, help='Standard deviation of SNR from log-normal distribution')
     parser.add_argument('--SNRmax', type=float, default=30.0, help='Maximum SNR of FRB signal')
 
-    parser.add_argument('--weight_signal', type=float, default=1.0,
+    parser.add_argument('-w', '--weight_signal', type=float, default=1.0,
                         help='Class weight of true signal, used to favor false positives (< 1) or false negatives (> 1)')
 
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size for model training')
-    parser.add_argument('--epochs', type=int, default=32, help='Number of epochs to train with')
+    parser.add_argument('-split_frac', '--train_val_split', type=float, default=0.5, help='Ratio to divide training and validation sets.')
+    parser.add_argument('-b', '--batch_size', type=int, default=32, help='Batch size for model training')
+    parser.add_argument('-e', '--epochs', type=int, default=32, help='Number of epochs to train with')
 
     # save the model, confusion matrix for last epoch, and validation set
     parser.add_argument('--previous_model', type=str, default=None,
                         help='Path to previous model, will be trained on new simulated data.')
     parser.add_argument('-s', '--save_model', dest='best_model_file', type=str,
                         default='./best_model.h5', help='Filename/path to save best model')
-    parser.add_argument('--save_confusion_matrix', dest='conf_mat', type=str,
-                        default='./confusion_matrix.png', help='Filename to store final confusion matrix')
+    parser.add_argument('--confusion', dest='conf_mat', type=str,
+                        default=None, help='Filename to store final confusion matrix')
+    parser.add_argument('--disable_numba', dest='enable_numba', action='store_false',
+                        help='Disable numba speed optimizations')
 
     args = parser.parse_args()
 
@@ -160,22 +157,29 @@ if __name__ == "__main__":
     f_shift = args.f_shift
 
     max_sampling_time = args.max_sampling_time
-    save_name = args.save_name
+    training_set_name = args.save_training_set
 
     # Args for model parameters
+    prev_training_set = args.load_training
     saved_model_name = args.best_model_file
     previous_model = args.previous_model
 
-    if saved_training_set:
-        print(f"Loading in previously created training set: {saved_training_set}\n")
-        training_frames = np.load(saved_training_set, allow_pickle=True)
+    if prev_training_set: # override -p argument if loading in training set
+        print(f"Loading in previously created training set: {prev_training_set}\n")
+        training_frames = np.load(prev_training_set, allow_pickle=True)
     else:
         if path_to_files is None:
             raise ValueError("-p (path_to_files) must be specified when creating training set from scratch")
 
         print("Creating training set from scratch...\n")
-        training_frames = generate_training_set.main(path_to_files, fchans, tchans, f_shift,
+        training_frames = generate_dataset.main(path_to_files, fchans, tchans, f_shift,
                                             samples_per_file, total_samples, max_sampling_time)
+
+        if training_set_name:
+            # save final array to disk
+            print("Saving training set to " + training_set_name)
+            np.save(training_set_name, training_frames)
+
 
     ftdata, labels = make_labels(training_frames)
 
@@ -187,7 +191,7 @@ if __name__ == "__main__":
 
         start_time = time()
         print('Splitting data into training and validation sets')
-        train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split_numba(ftdata, labels)
+        train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split_numba(ftdata, labels, args.train_val_split)
         print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
     else:
         print('Scaling arrays...')
@@ -196,8 +200,11 @@ if __name__ == "__main__":
 
         start_time = time()
         print('Splitting data into training and validation sets')
-        train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split(ftdata, labels)
+        train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split(ftdata, labels, args.train_val_split)
         print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
+
+    # disable file locking to save NN models
+    os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
     print("Constructing CNN with input parameters")
     model = construct_conv2d(num_conv_layers=args.num_conv_layers, num_filters=args.num_filters,
@@ -205,20 +212,16 @@ if __name__ == "__main__":
                                 saved_model_name=saved_model_name, previous_model=previous_model)
     print(model.summary())
 
-    # save model with lowest validation loss
-    loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)
-
-    # cut learning rate in half if validation loss doesn't improve in 5 epochs
-    reduce_lr_callback = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
-
-    # stop training if validation loss doesn't improve after 15 epochs
-    early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
-
     print("\nTraining model with input data...")
     start_time = time() # training time
-    model.fit(x=train_ftdata, y=train_labels, validation_data=(val_ftdata, val_labels),
-                class_weight={0: 1, 1: args.weight_signal}, batch_size=args.batch_size,
-                epochs=args.epochs, callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
+
+    # add channel dimension for Keras tensors (1 channel)
+    train_ftdata = train_ftdata[..., None]
+    val_ftdata = val_ftdata[..., None]
+
+    fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
+                saved_model_name=saved_model_name, weight_signal=args.weight_signal,
+                batch_size=args.batch_size, epochs=args.epochs)
 
     print(f"Training on {len(train_labels)} samples took {np.round((time() - start_time) / 60, 2)} minutes")
 
