@@ -31,7 +31,7 @@ def simulate_pulse(frame, add_to_frame=True):
     drift_rate = np.random.uniform(-5, 5)
 
     # sample SNR and frequency profile randomly
-    random_SNR = 8 + np.random.lognormal(mean=1.0, sigma=1.0)
+    random_SNR = 10 + np.random.lognormal(mean=1.0, sigma=1.0)
     width = np.random.uniform(10, 40)
     f_profile_type = np.random.choice(['box', 'gaussian', 'lorentzian', 'voigt'])
 
@@ -61,11 +61,11 @@ def make_labels(training_frames):
     print(f'Number of time bins per sample: {tchans}')
     print('\n')
 
-    ftdata = np.zeros([len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
+    # preallocate array with twice as many samples as there are frames
+    # each frame will be used, once with purely background and once with injected pulse
+    ftdata = np.zeros([2 * len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
 
-    # add pulses to frames only on odd-numbered samples
-    print("Simulating pulses in training backgrounds")
-    for sample_number, frame in enumerate(tqdm(training_frames)):
+    """for sample_number, frame in enumerate(tqdm(training_frames)):
         if sample_number % 2 == 0:
             # add blank observation to training set
             simulate_pulse(frame, add_to_frame=False)
@@ -73,10 +73,20 @@ def make_labels(training_frames):
             # add signal to frame
             simulate_pulse(frame, add_to_frame=True)
 
-        ftdata[sample_number, :, :] = frame.get_data()
+        ftdata[sample_number, :, :] = frame.get_data()"""
+
+    # add pulses to frames only on odd-numbered samples
+    print("Simulating pulses in training backgrounds")
+    for sample_number, frame in enumerate(tqdm(training_frames)):
+        # add blank observation to training set
+        ftdata[2*sample_number, :, :] = np.copy(frame.get_data())
+
+        # add signal to frame
+        simulate_pulse(frame, add_to_frame=True)
+        ftdata[2*sample_number + 1, :, :] = frame.get_data()
 
     # make array of alternating training labels
-    labels = np.zeros(len(training_frames))
+    labels = np.zeros(2 * len(training_frames))
     labels[1::2] = 1
 
     return ftdata, labels
@@ -115,7 +125,7 @@ if __name__ == "__main__":
 
     ### MODEL PARAMETERS ###
     # parameters for convolutional layers
-    parser.add_argument('-conv', '--num_conv_layers', type=int, default=3, help='Number of convolutional layers to train with.')
+    parser.add_argument('-conv', '--num_conv_layers', type=int, default=2, help='Number of convolutional layers to train with.')
     parser.add_argument('-filt', '--num_filters', type=int, default=32,
                         help='Number of filters in starting convolutional layer, doubles with every convolutional block')
 
