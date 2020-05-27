@@ -73,6 +73,10 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
     else:
         raise ValueError(f"path_to_files should be list or str type, not {type(path_to_files)}.")
 
+    # if given None, sampling will continue until out of files or total_samples is achieved
+    if max_sampling_time is None:
+        max_sampling_time = np.inf
+
     print(f"Total number of files to possibly sample from: {len(files)}")
     print(f"Total number of samples to get: {total_samples}")
 
