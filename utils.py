@@ -84,14 +84,14 @@ def split_reshape(array, bins_per_array):
     return split_array
 
 def scale_data(ftdata):
-    """Subtract each channel in 3D array by its median and
+    """Subtract each frequency channel in 3D array by its median and
     divide each array by its global standard deviation. Perform
     this standardization in chunks to avoid a memory overload."""
 
     N = 10000
     for i in tqdm.trange(int(np.ceil(len(ftdata)/float(N)))):
         ftdata_chunk = ftdata[i*N:(i + 1) * N]
-        medians = np.median(ftdata_chunk, axis=-1)[:, :, np.newaxis]
+        medians = np.median(ftdata_chunk, axis=1)[:, :, np.newaxis]
         stddev = np.std(ftdata_chunk.reshape(len(ftdata_chunk), -1), axis=-1)[:, np.newaxis, np.newaxis]
 
         scaled_ftdata = (ftdata_chunk - medians) / stddev
@@ -106,10 +106,11 @@ def scale_data_numba(ftdata):
     Subtract each channel in 3D array by its median and
     divide each array by its global standard deviation.
     """
+    num_rows = ftdata.shape[1]
     for chunk_idx in numba.prange(len(ftdata)):
         rescaled_chunk = ftdata[chunk_idx] # iterate over every 2D array
         stddev = np.std(rescaled_chunk)
-        for row_idx in numba.prange(len(rescaled_chunk)): # subtract median from each row
+        for row_idx in numba.prange(num_rows): # subtract median from each row
             rescaled_chunk[row_idx, :] -= np.median(rescaled_chunk[row_idx, :])
         rescaled_chunk[:, :] /= stddev # divide every 2D array by its stddev
 
@@ -264,7 +265,7 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
     names = ['TP', 'FP', 'FN', 'TN']
     confusion_data = [TPdata, FPdata, FNdata, TNdata]
 
-    fig_confusion, ax_confusion = plt.subplots(nrows=2, ncols=2)
+    fig_confusion, ax_confusion = plt.subplots(nrows=2, ncols=2, figsize=(8, 6))
     for num_samples, name, data, ax in zip(conf_mat, names, confusion_data, ax_confusion.flatten()):
         ax.imshow(data, aspect='auto')
         ax.set_title(f'{name}: {num_samples}')
