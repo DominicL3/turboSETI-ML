@@ -32,7 +32,7 @@ def split_data(data, bins_per_array, enable_numba=True)
     print(f"Split runtime: {np.round(time() - start_time, 4)} seconds")
     return data
 
-def prep_batch_for_prediction(data, bins_per_array, enable_numba=True):
+def prep_batch_for_prediction(data, enable_numba=True):
     # normalize each spectrum in an array to 0 median and global stddev to 1
     start_time = time()
     print("Scaling data...")
@@ -99,8 +99,6 @@ if __name__ == "__main__":
         Path to trained model used to make prediction. Should be a Keras .h5 file.
     fchans: int, optional
         Number of frequency channels (default 1024) to extract from each array.
-    tchans: int, optional
-        Number of time channels (default all) to extract from each array.
     save_predicted_pulses: str, optional
         Filename to save every candidate predicted to contain a pulse.
     """
@@ -120,8 +118,6 @@ if __name__ == "__main__":
     # Default value of None means all time channels are used.
     parser.add_argument('-f', '--fchans', type=int, default=1024,
                         help='Number of frequency channels to extract for each sample in candidate file.')
-    parser.add_argument('-t', '--tchans', type=int, default=None,
-                        help='Number of time bins to extract for each sample. If None, use entire integration time.')
     parser.add_argument('-fs', '--f_shift', type=float, default=None,
                         help='Number of frequency channels from start of current frame to begin successive frame. If None, default to no overlap, i.e. f_shift=fchans).')
 
@@ -184,7 +180,7 @@ if __name__ == "__main__":
         freqs_test = split_data(freqs_test, bins_per_array, args.enable_numba)
 
         # scale candidate arrays and add channel dimension for Keras
-        ftdata_test = prep_batch_for_prediction(ftdata_test, bins_per_array)
+        ftdata_test = prep_batch_for_prediction(ftdata_test, args.enable_numba)
 
         # load model and make prediction
         pred_test = model.predict(ftdata_test, verbose=1)[:, 0]
