@@ -109,7 +109,7 @@ if __name__ == "__main__":
                         help='Number of frequency channels to extract for each training sample')
     parser.add_argument('-t', '--tchans', type=int, default=None,
                         help='Number of time bins to extract for each training sample. If None, use entire integration time')
-    parser.add_argument('--f_shift', type=float, default=None,
+    parser.add_argument('-fs', '--f_shift', type=float, default=None,
                         help='Number of frequency channels to extract for each training sample')
 
     parser.add_argument('-max_time', '--max_sampling_time', type=int, default=600,
