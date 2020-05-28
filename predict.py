@@ -93,23 +93,16 @@ if __name__ == "__main__":
     """
     Parameters
     ---------------
+    candidate_file: str
+        Path to candidate file to be predicted. Should be .fil or .h5 file.
     model_name: str
-        Path to trained model used to make prediction. Should be .h5 file
-    frb_cand_path: str
-        Path to .txt file that contains data about pulses within filterbank file. This
-        file should contain columns 'snr','time','samp_idx','dm','filter', and'prim_beam'.
-    filterbank_candidate: str
-        Path to candidate file to be predicted. Should be .fil file
-    NCHAN: int, optional
-        Number of frequency channels (default 64) to resize psrchive files to.
-    no-FRBcandprob: flag, optional
-        Whether or not to save edited FRBcand file containing pulse probabilities.
-    FRBcandprob: str, optional
-        Path to save FRBcandprob.txt (default is same path as frb_cand_path)
-    save_top_candidates: str, optional
-        Filename to save pre-processed candidates, just before they are thrown into CNN.
-    save_predicted_FRBs: str, optional
-        Filename to save every candidate predicted to contain an FRB.
+        Path to trained model used to make prediction. Should be a Keras .h5 file.
+    fchans: int, optional
+        Number of frequency channels (default 1024) to extract from each array.
+    tchans: int, optional
+        Number of time channels (default all) to extract from each array.
+    save_predicted_pulses: str, optional
+        Filename to save every candidate predicted to contain a pulse.
     """
 
     # Read command line arguments
@@ -132,12 +125,12 @@ if __name__ == "__main__":
     parser.add_argument('-fs', '--f_shift', type=float, default=None,
                         help='Number of frequency channels from start of current frame to begin successive frame. If None, default to no overlap, i.e. f_shift=fchans).')
 
-    parser.add_argument('--thresh', type=float, default=0.5, help='Threshold probability to admit whether example is FRB or RFI.')
+    parser.add_argument('-p', '--thresh', type=float, default=0.5, help='Threshold probability to admit whether example is FRB or RFI.')
     parser.add_argument('--disable_numba', dest='enable_numba', action='store_false',
                         help='Disable numba speed optimizations')
 
     # options to save outputs
-    parser.add_argument('--save_predicted_pulses', type=str, default=None, help='Filename to save all predicted pulses.')
+    parser.add_argument('-s', '--save_predicted_pulses', type=str, default=None, help='Filename to save all predicted pulses.')
 
     args = parser.parse_args()
 
@@ -148,7 +141,7 @@ if __name__ == "__main__":
 
     nbytes_max = args.max_memory * 1e9 # load in at most this many bytes into memory at once
 
-    # load and display summary of given model
+    # load model and display summary
     model = load_model(model_name, compile=True)
     print(model.summary())
 
@@ -171,13 +164,14 @@ if __name__ == "__main__":
         print(f"Frequency windows for each part (f_start, f_stop): {freq_windows}")
 
     for test_part in np.arange(len(freq_windows)):
+        print(f"\nAnalyzing part {test_part} / {len(freq_windows)}:")
         f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part]
-        print(f"Start freq: {f_start_max_filesize}, Stop freq: {f_stop_max_filesize}")
+        print(f"Loading data from f_start={f_start_max_filesize} to f_stop={f_stop_max_filesize}...")
 
         # load in fil/h5 file into memory
         start_time = time()
         obs = Waterfall(candidate_file, f_start=f_start_max_filesize, f_stop=f_stop_max_filesize, max_load=12)
-        print(f"Reading in file took {np.round((time() - start_time)/60, 4)} min")
+        print(f"Loading data took {np.round((time() - start_time)/60, 4)} min")
         obs.freqs = obs.container.populate_freqs()
 
         # load data and split it so each individual array has bins_per_array freq channels each
@@ -209,4 +203,5 @@ if __name__ == "__main__":
         else:
             pdf_name = f"{args.save_predicted_pulses.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
 
+        print(f"Saving {len(predicted_pulses)} pulses to {pdf_name}")
         save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs)
