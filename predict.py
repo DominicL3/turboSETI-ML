@@ -7,8 +7,12 @@ from blimpy import Waterfall
 
 from tqdm import trange
 from time import time
-import os
+import os, argparse
 import numba # speed up NumPy
+
+# disable eager execution when running with Keras
+import tensorflow
+tensorflow.compat.v1.disable_eager_execution()
 
 from tensorflow.keras.models import load_model
 import utils
@@ -16,31 +20,22 @@ import utils
 # used for reading in h5 files
 os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
-def split_data(data, bins_per_array, enable_numba=True)
+def split_data(data, bins_per_array, enable_numba=True):
     # split 2D data into smaller batches
-    start_time = time()
     if data.shape[1] % bins_per_array == 0:
-        print("Reshaping array...")
         data = utils.split_reshape(data, bins_per_array)
-    elif args.enable_numba:
-        print("Splitting array with Numba...")
+    elif enable_numba:
         data = utils.split_numba(data, bins_per_array)
     else:
-        print("Splitting array without Numba optimization...")
         data = utils.split(data, bins_per_array)
-
-    print(f"Split runtime: {np.round(time() - start_time, 4)} seconds")
     return data
 
 def prep_batch_for_prediction(data, enable_numba=True):
     # normalize each spectrum in an array to 0 median and global stddev to 1
-    start_time = time()
-    print("Scaling data...")
-    if args.enable_numba:
+    if enable_numba:
         utils.scale_data_numba(data)
     else:
         utils.scale_data(data)
-    print(f"Scaling runtime: {np.round(time() - start_time, 4)} seconds")
 
     # add channel dimension for Keras tensors (1 channel)
     data = data[..., None]
@@ -52,8 +47,7 @@ def save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs):
     frequencies and prediction probabilities."""
 
     # compute number of predictions per page by minimizing number of blank axes
-    preds_per_page = np.argmin([x - pdf_name % x for x in np.arange(4, 8)])
-
+    preds_per_page = 4 + np.argmax([(len(predicted_pulses) % x) / x for x in np.arange(4, 9)])
     fig_height = preds_per_page * 3
 
     with PdfPages(pdf_name) as pdf:
@@ -70,7 +64,7 @@ def save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs):
 
             # extract random array with corresponding freqs and prediction probability
             pulse = predicted_pulses[i]
-            freq = pulse_freqs[i]
+            freq = pulse_freqs[i].flatten()
             prob = np.round(pulse_probs[i], 4)
 
             # plot spectrogram
@@ -81,7 +75,7 @@ def save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs):
             # plot bandpass
             bandpass = np.mean(pulse, axis=0)
             ax[1].plot(freq[::-1], bandpass)
-            ax[1].set(xlabel='freq (MHz)', ylabel='power (counts)', title='Bandpass')
+            ax[1].set(xlabel='freq (MHz)', ylabel='power (counts)', title='Frequency Spectrum')
 
             # last plot, so save last page even if incomplete
             if i == len(predicted_pulses) - 1:
@@ -126,7 +120,7 @@ if __name__ == "__main__":
                         help='Disable numba speed optimizations')
 
     # options to save outputs
-    parser.add_argument('-s', '--save_predicted_pulses', type=str, default=None, help='Filename to save all predicted pulses.')
+    parser.add_argument('-s', '--save_predicted_pulses', type=str, default='predictions.pdf', help='Filename to save all predicted pulses.')
 
     args = parser.parse_args()
 
@@ -154,33 +148,49 @@ if __name__ == "__main__":
                     for i in np.arange(np.ceil(obs.container.file_size_bytes / nbytes_max))]
 
     if len(freq_windows) > 1:
-        print("This file is too large to be loaded in all at once"\
+        print("\nThis file is too large to be loaded in all at once. "\
             f"Loading file in {len(freq_windows)} parts, about {args.max_memory} GB each")
         print(f"Each part will contain approximately {freq_bins_per_load} frequency channnels to predict on")
         print(f"Frequency windows for each part (f_start, f_stop): {freq_windows}")
 
-    for test_part in np.arange(len(freq_windows)):
+    total_pulses = 0 # running total of number of pulses in entire file
+    for test_part in np.arange(1, len(freq_windows) + 1):
         print(f"\nAnalyzing part {test_part} / {len(freq_windows)}:")
-        f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part]
+        f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part - 1]
         print(f"Loading data from f_start={f_start_max_filesize} to f_stop={f_stop_max_filesize}...")
 
         # load in fil/h5 file into memory
         start_time = time()
         obs = Waterfall(candidate_file, f_start=f_start_max_filesize, f_stop=f_stop_max_filesize, max_load=12)
-        print(f"Loading data took {np.round((time() - start_time)/60, 4)} min")
+        print(f"Loading data took {np.round((time() - start_time)/60, 4)} min\n")
         obs.freqs = obs.container.populate_freqs()
 
-        # load data and split it so each individual array has bins_per_array freq channels each
-        ftdata_test = obs.data[:, 0]
-        t_end = obs.header['tsamp'] * obs.n_ints_in_file
+        # copy data
+        print("Copying data...")
+        if args.enable_numba:
+            ftdata_test = utils.copy_2d_data_numba(obs.data[:, 0])
+        else:
+            ftdata_test = utils.copy_2d_data(obs.data[:, 0])
+        print(f"Copying data took {np.round(time() - start_time, 4)} seconds\n")
+
+        obs.data = None # free up memory since obs.data isn't needed anymore
+        t_end = obs.header['tsamp'] * obs.n_ints_in_file # observation time in secondss
+
+        # split 2D array into 3D array so each individual array has bins_per_array freq channels each
+        print("Splitting array...")
+        start_time = time()
         ftdata_test = split_data(ftdata_test, bins_per_array, args.enable_numba)
+        print(f"Split runtime: {np.round(time() - start_time, 4)} seconds\n")
 
         # split up frequencies corresponding to data
         freqs_test = obs.freqs.reshape(1, -1)
         freqs_test = split_data(freqs_test, bins_per_array, args.enable_numba)
 
         # scale candidate arrays and add channel dimension for Keras
+        start_time = time()
+        print("Scaling data and preparing batch for prediction...")
         ftdata_test = prep_batch_for_prediction(ftdata_test, args.enable_numba)
+        print(f"Scaling runtime: {np.round(time() - start_time, 4)} seconds\n")
 
         # load model and make prediction
         pred_test = model.predict(ftdata_test, verbose=1)[:, 0]
@@ -192,8 +202,13 @@ if __name__ == "__main__":
         pulse_freqs = freqs_test[voted_pulse_probs]
         pulse_probs = pred_test[voted_pulse_probs]
 
-        print(f"\nNumber of pulses: {len(voted_pulse_probs)}")
+        # count number of predicted pulses in file and add to running total
+        num_pulses_in_file = np.sum(voted_pulse_probs)
+        total_pulses += num_pulses_in_file
 
+        print(f"\nNumber of pulses: {num_pulses_in_file}")
+
+        # break pdf into parts if > 1 chunks are extracted
         if len(freq_windows) == 1:
             pdf_name = args.save_predicted_pulses
         else:
