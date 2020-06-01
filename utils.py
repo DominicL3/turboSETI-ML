@@ -10,6 +10,21 @@ data preprocessing and computing training results.
 @source Liam Connor (https://github.com/liamconnor/single_pulse_ml)
 """
 
+def copy_2d_data(data):
+    """Return a copy of a 2D array."""
+    return np.copy(data)
+
+@numba.njit(parallel=True)
+def copy_2d_data_numba(data):
+    """Return a copy of a 2D array,
+    but with Numba speedup."""
+    num_rows, num_cols = data.shape
+    copied_array = np.zeros(data.shape)
+    for i in numba.prange(num_rows):
+        for j in numba.prange(num_cols):
+            copied_array[i, j] = data[i, j]
+    return copied_array
+
 def split(array, bins_per_array):
     """
     Splits long 2D array into 3D array of multiple 2D arrays,
@@ -49,7 +64,7 @@ def split_numba(array, bins_per_array):
 
     Returns:
         split_array : numpy.ndarray
-            Array after splitting.
+            3D array after splitting.
     """
     total_bins = array.shape[1]
 
