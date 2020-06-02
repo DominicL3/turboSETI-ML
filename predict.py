@@ -42,16 +42,34 @@ def prep_batch_for_prediction(data, enable_numba=True):
 
     return data
 
-def save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs):
-    """Save predicted pulses to PDF, along with their corresponding
+def save_to_csv(csv_name, signal_freqs, signal_probs):
+    """Save the frequencies and probabilities of predicted signals to CSV.
+    Assumes signal_freqs is a 2D array where each row is a frequency slice
+    belonging to a predicted signal, and that signal_probs is a 1D array."""
+
+    hdr = "Min freq (MHz), Max freq (MHz), Probability"
+    min_freqs = np.min(signal_freqs, axis=1)
+    max_freqs = np.max(signal_freqs, axis=1)
+
+    data = np.array([min_freqs, max_freqs, signal_probs]).reshape(-1, 3)
+
+    if os.path.isfile(csv_name):
+        loaded_data = np.loadtxt(csv_name, skiprows=1)
+        data = np.concatenate([loaded_data, data], axis=0)
+
+    np.savetxt(csv_name, data, fmt='%-10.5f', header=hdr)
+
+
+def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs):
+    """Save predicted signals to PDF, along with their corresponding
     frequencies and prediction probabilities."""
 
     # compute number of predictions per page by minimizing number of blank axes
-    preds_per_page = 4 + np.argmax([(len(predicted_pulses) % x) / x for x in np.arange(4, 9)])
+    preds_per_page = 4 + np.argmax([(len(predicted_signals) % x) / x for x in np.arange(4, 9)])
     fig_height = preds_per_page * 3
 
     with PdfPages(pdf_name) as pdf:
-        for i in trange(len(predicted_pulses)):
+        for i in trange(len(predicted_signals)):
             if i % preds_per_page == 0:
                 if i != 0:
                     fig_narrowband.tight_layout()
@@ -63,22 +81,22 @@ def save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs):
             ax = ax_narrowband[i % preds_per_page]
 
             # extract random array with corresponding freqs and prediction probability
-            pulse = predicted_pulses[i]
-            freq = pulse_freqs[i].flatten()
-            prob = np.round(pulse_probs[i], 4)
+            signal = predicted_signals[i]
+            freq = signal_freqs[i]
+            prob = np.round(signal_probs[i], 4)
 
             # plot spectrogram
-            ax[0].imshow(pulse[:, ::-1], aspect='auto', origin='lower',
+            ax[0].imshow(signal[:, ::-1], aspect='auto', origin='lower',
                         extent=[min(freq), max(freq), 0, t_end])
             ax[0].set(xlabel='freq (MHz)', ylabel='time (s)', title=f"Prediction: {prob}")
 
-            # plot bandpass
-            bandpass = np.mean(pulse, axis=0)
-            ax[1].plot(freq[::-1], bandpass)
+            # plot spectrum
+            spectrum = np.mean(signal, axis=0)
+            ax[1].plot(freq[::-1], spectrum)
             ax[1].set(xlabel='freq (MHz)', ylabel='power (counts)', title='Frequency Spectrum')
 
             # last plot, so save last page even if incomplete
-            if i == len(predicted_pulses) - 1:
+            if i == len(predicted_signals) - 1:
                 fig_narrowband.tight_layout()
                 pdf.savefig(fig_narrowband, dpi=80)
                 plt.close(fig_narrowband)
@@ -93,8 +111,8 @@ if __name__ == "__main__":
         Path to trained model used to make prediction. Should be a Keras .h5 file.
     fchans: int, optional
         Number of frequency channels (default 1024) to extract from each array.
-    save_predicted_pulses: str, optional
-        Filename to save every candidate predicted to contain a pulse.
+    save_predicted_signals: str, optional
+        Filename to save every candidate predicted to contain a signal.
     """
 
     # Read command line arguments
@@ -120,9 +138,13 @@ if __name__ == "__main__":
                         help='Disable numba speed optimizations')
 
     # options to save outputs
-    parser.add_argument('-s', '--save_predicted_pulses', type=str, default='predictions.pdf', help='Filename to save all predicted pulses.')
+    parser.add_argument('-csv', '--csv_name', type=str, default='predictions.csv', help='Filename (csv) to save all predicted signals.')
+    parser.add_argument('-pdf', '--save_pdf', type=str, default=None, help='Filename (pdf) to save all predicted signals.')
 
     args = parser.parse_args()
+
+    # update runtime as prediction moves along
+    script_start_time = time()
 
     # load file path
     candidate_file = args.candidate_file
@@ -153,7 +175,7 @@ if __name__ == "__main__":
         print(f"Each part will contain approximately {freq_bins_per_load} frequency channnels to predict on")
         print(f"Frequency windows for each part (f_start, f_stop): {freq_windows}")
 
-    total_pulses = 0 # running total of number of pulses in entire file
+    total_signals = 0 # running total of number of signals in entire file
     for test_part in np.arange(1, len(freq_windows) + 1):
         print(f"\nAnalyzing part {test_part} / {len(freq_windows)}:")
         f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part - 1]
@@ -174,7 +196,6 @@ if __name__ == "__main__":
         print(f"Copying data took {np.round(time() - start_time, 4)} seconds\n")
 
         obs.data = None # free up memory since obs.data isn't needed anymore
-        t_end = obs.header['tsamp'] * obs.n_ints_in_file # observation time in secondss
 
         # split 2D array into 3D array so each individual array has bins_per_array freq channels each
         print("Splitting array...")
@@ -185,6 +206,7 @@ if __name__ == "__main__":
         # split up frequencies corresponding to data
         freqs_test = obs.freqs.reshape(1, -1)
         freqs_test = split_data(freqs_test, bins_per_array, args.enable_numba)
+        freqs_test = freqs_test[:, 0]
 
         # scale candidate arrays and add channel dimension for Keras
         start_time = time()
@@ -195,24 +217,36 @@ if __name__ == "__main__":
         # load model and make prediction
         pred_test = model.predict(ftdata_test, verbose=1)[:, 0]
 
-        voted_pulse_probs = pred_test > args.thresh # mask for arrays that were deemed true pulses
+        voted_signal_probs = pred_test > args.thresh # mask for arrays that were deemed true signals
 
-        # get paths to predicted pulses and their probabilities
-        predicted_pulses = ftdata_test[voted_pulse_probs][:, :, :, 0]
-        pulse_freqs = freqs_test[voted_pulse_probs]
-        pulse_probs = pred_test[voted_pulse_probs]
+        # get paths to predicted signals and their probabilities
+        predicted_signals = ftdata_test[voted_signal_probs][:, :, :, 0]
+        signal_freqs = freqs_test[voted_signal_probs]
+        signal_probs = pred_test[voted_signal_probs]
 
-        # count number of predicted pulses in file and add to running total
-        num_pulses_in_file = np.sum(voted_pulse_probs)
-        total_pulses += num_pulses_in_file
+        # count number of predicted signals in file and add to running total
+        num_signals_in_file = np.sum(voted_signal_probs)
+        total_signals += num_signals_in_file
 
-        print(f"\nNumber of pulses: {num_pulses_in_file}")
+        print(f"\nNumber of signals in part: {num_signals_in_file}")
+        print(f"Total signals found: {total_signals}")
 
-        # break pdf into parts if > 1 chunks are extracted
-        if len(freq_windows) == 1:
-            pdf_name = args.save_predicted_pulses
-        else:
-            pdf_name = f"{args.save_predicted_pulses.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
+        print(f"\nStoring info on {len(predicted_signals)} predicted candidates to {args.csv_name}")
+        save_to_csv(args.csv_name, signal_freqs, signal_probs)
 
-        print(f"Saving {len(predicted_pulses)} pulses to {pdf_name}")
-        save_to_pdf(pdf_name, t_end, predicted_pulses, pulse_freqs, pulse_probs)
+        if args.save_pdf:
+            # break pdf into parts if > 1 chunks are extracted
+            if len(freq_windows) == 1:
+                pdf_name = args.save_pdf
+            else:
+                pdf_name = f"{args.save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
+
+            # compute observation time in secondss
+            t_end = obs.header['tsamp'] * obs.n_ints_in_file
+
+            print(f"Saving images of {len(predicted_signals)} signals to {pdf_name}")
+            save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs)
+
+        print(f"Elapsed runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
+
+    print(f"Total runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
