@@ -65,16 +65,6 @@ def make_labels(training_frames):
     # each frame will be used, once with purely background and once with injected pulse
     ftdata = np.zeros([2 * len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
 
-    """for sample_number, frame in enumerate(tqdm(training_frames)):
-        if sample_number % 2 == 0:
-            # add blank observation to training set
-            simulate_pulse(frame, add_to_frame=False)
-        else:
-            # add signal to frame
-            simulate_pulse(frame, add_to_frame=True)
-
-        ftdata[sample_number, :, :] = frame.get_data()"""
-
     # add pulses to frames only on odd-numbered samples
     print("Simulating pulses in training backgrounds")
     for sample_number, frame in enumerate(tqdm(training_frames)):
