@@ -45,17 +45,22 @@ def save_to_csv(csv_name, signal_freqs, signal_probs):
     Assumes signal_freqs is a 2D array where each row is a frequency slice
     belonging to a predicted signal, and that signal_probs is a 1D array."""
 
+    # compute min/max frequency window of every predicted signal
     hdr = "Min freq (MHz), Max freq (MHz), Probability"
     min_freqs = np.min(signal_freqs, axis=1)
     max_freqs = np.max(signal_freqs, axis=1)
 
-    data = np.array([min_freqs, max_freqs, signal_probs]).reshape(-1, 3)
+    # fill data matrix
+    csv_data = np.zeros([len(signal_freqs), 3], dtype=signal_freqs.dtype)
+    csv_data[:, 0] = min_freqs
+    csv_data[:, 1] = max_freqs
+    csv_data[:, 2] = signal_probs
 
     if os.path.isfile(csv_name):
         loaded_data = np.loadtxt(csv_name, skiprows=1)
         data = np.concatenate([loaded_data, data], axis=0)
 
-    np.savetxt(csv_name, data, fmt='%-10.5f', header=hdr)
+    np.savetxt(csv_name, csv_data, fmt='%-10.5f', header=hdr)
 
 
 def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs):
@@ -229,20 +234,24 @@ if __name__ == "__main__":
 
         print(f"\nNumber of signals in part {test_part}: {num_signals_in_file}")
         print(f"\nStoring info on {len(predicted_signals)} predicted candidates to {args.csv_name}")
-        save_to_csv(args.csv_name, signal_freqs, signal_probs)
 
-        if args.save_pdf:
-            # break pdf into parts if > 1 chunks are extracted
-            if len(freq_windows) == 1:
-                pdf_name = args.save_pdf
-            else:
-                pdf_name = f"{args.save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
+        # save data to csv and/or pdf only if at least one signal was found
+        if num_signals_in_file > 0:
+            # save frequencies and prediction probabilities to csv
+            save_to_csv(args.csv_name, signal_freqs, signal_probs)
 
-            # compute observation time in secondss
-            t_end = obs.header['tsamp'] * obs.n_ints_in_file
+            if args.save_pdf:
+                # break pdf into parts if > 1 chunks are extracted
+                if len(freq_windows) == 1:
+                    pdf_name = args.save_pdf
+                else:
+                    pdf_name = f"{args.save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
 
-            print(f"Saving images of {len(predicted_signals)} signals to {pdf_name}")
-            save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs)
+                # compute observation time in secondss
+                t_end = obs.header['tsamp'] * obs.n_ints_in_file
+
+                print(f"Saving images of {len(predicted_signals)} signals to {pdf_name}")
+                save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs)
 
         print(f"\nTotal signals found: {total_signals}")
         print(f"Elapsed runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
