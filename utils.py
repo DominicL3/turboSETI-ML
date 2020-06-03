@@ -81,23 +81,6 @@ def split_numba(array, bins_per_array):
 
     return split_array
 
-# reshaping version of split()
-# used when total_bins % bins_per_array = 0
-def split_reshape(array, bins_per_array):
-    """
-    Same function as split() and split_numba(), but takes advantage
-    when bins_per_array divides evenly into total_bins to reshape,
-    since reshaping is much faster than np.split().
-
-    Returns:
-        split_array : numpy.ndarray
-            Array after splitting.
-    """
-    num_blocks = array.shape[1] / bins_per_array
-    split_array = array.reshape(int(num_blocks), array.shape[0], bins_per_array)
-
-    return split_array
-
 def scale_data(ftdata):
     """Subtract each frequency channel in 3D array by its median and
     divide each array by its global standard deviation. Perform

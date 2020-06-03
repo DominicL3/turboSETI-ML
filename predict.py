@@ -22,9 +22,7 @@ os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
 def split_data(data, bins_per_array, enable_numba=True):
     # split 2D data into smaller batches
-    if data.shape[1] % bins_per_array == 0:
-        data = utils.split_reshape(data, bins_per_array)
-    elif enable_numba:
+    if enable_numba:
         data = utils.split_numba(data, bins_per_array)
     else:
         data = utils.split(data, bins_per_array)
@@ -179,7 +177,7 @@ if __name__ == "__main__":
     for test_part in np.arange(1, len(freq_windows) + 1):
         print(f"\nAnalyzing part {test_part} / {len(freq_windows)}:")
         f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part - 1]
-        print(f"Loading data from f_start={f_start_max_filesize} to f_stop={f_stop_max_filesize}...")
+        print(f"Loading data from f_start={f_start_max_filesize} MHz to f_stop={f_stop_max_filesize} MHz...")
 
         # load in fil/h5 file into memory
         start_time = time()
@@ -214,7 +212,8 @@ if __name__ == "__main__":
         ftdata_test = prep_batch_for_prediction(ftdata_test, args.enable_numba)
         print(f"Scaling runtime: {np.round(time() - start_time, 4)} seconds\n")
 
-        # load model and make prediction
+        # make prediction
+        print("Predicting with model...")
         pred_test = model.predict(ftdata_test, verbose=1)[:, 0]
 
         voted_signal_probs = pred_test > args.thresh # mask for arrays that were deemed true signals
@@ -228,9 +227,7 @@ if __name__ == "__main__":
         num_signals_in_file = np.sum(voted_signal_probs)
         total_signals += num_signals_in_file
 
-        print(f"\nNumber of signals in part: {num_signals_in_file}")
-        print(f"Total signals found: {total_signals}")
-
+        print(f"\nNumber of signals in part {test_part}: {num_signals_in_file}")
         print(f"\nStoring info on {len(predicted_signals)} predicted candidates to {args.csv_name}")
         save_to_csv(args.csv_name, signal_freqs, signal_probs)
 
@@ -247,6 +244,7 @@ if __name__ == "__main__":
             print(f"Saving images of {len(predicted_signals)} signals to {pdf_name}")
             save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs)
 
+        print(f"\nTotal signals found: {total_signals}")
         print(f"Elapsed runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
 
     print(f"Total runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
