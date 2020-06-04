@@ -114,43 +114,6 @@ def scale_data_numba(ftdata):
 
         ftdata[chunk_idx] = rescaled_chunk
 
-def train_val_split(ftdata, labels, split_fraction):
-    """Split ftdata and labels into training and validation sets."""
-    NTRAIN = int(len(ftdata) * split_fraction) # split_fraction defines what proportion is training set
-
-    ind = np.arange(len(ftdata))
-    np.random.shuffle(ind)
-
-    # split indices into training and evaluation set
-    ind_train = ind[:NTRAIN]
-    ind_val = ind[NTRAIN:]
-
-    # split examples into training and test set based on randomized indices
-    train_ftdata, val_ftdata = ftdata[ind_train], ftdata[ind_val]
-    train_labels, val_labels = labels[ind_train], labels[ind_val]
-
-    return train_ftdata, train_labels, val_ftdata, val_labels
-
-@numba.njit(parallel=True)
-def train_val_split_numba(ftdata, labels, split_fraction):
-    """Literally the same function as train_val_split, but
-    runs with Numba for speed optimizations."""
-
-    NTRAIN = int(len(ftdata) * split_fraction) # split_fraction defines what proportion is training set
-
-    ind = np.arange(len(ftdata))
-    np.random.shuffle(ind)
-
-    # split indices into training and evaluation set
-    ind_train = ind[:NTRAIN]
-    ind_val = ind[NTRAIN:]
-
-    # split examples into training and test set based on randomized indices
-    train_ftdata, val_ftdata = ftdata[ind_train], ftdata[ind_val]
-    train_labels, val_labels = labels[ind_train], labels[ind_val]
-
-    return train_ftdata, train_labels, val_ftdata, val_labels
-
 def get_classification_results(y_true, y_pred):
     """ Take true labels (y_true) and model-predicted
     label (y_pred) for a binary classifier, and return

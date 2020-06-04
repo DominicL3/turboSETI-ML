@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.model_selection import train_test_split
 
 from tqdm import tqdm
 from time import time
@@ -53,6 +54,13 @@ def simulate_pulse(frame, add_to_frame=True):
                                             width=width,
                                             f_profile_type=f_profile_type)
 
+def get_slope_in_pixels(frame):
+    """Convert drift rate from Hz/s to
+    Assumes frame has metadata attribute with drift rate."""
+    drift_rate = frame.metadata['drift_rate']
+    slope_pixels = (frame.df/frame.dt) / drift_rate
+    return slope_pixels
+
 def make_labels(training_frames):
     # pre-allocate training data array using first frame
     f0 = training_frames[0]
@@ -65,6 +73,10 @@ def make_labels(training_frames):
     # each frame will be used, once with purely background and once with injected pulse
     ftdata = np.zeros([2 * len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
 
+    # make array of alternating training labels
+    labels = np.zeros(2 * len(training_frames))
+    slopes = np.zeros(2 * len(training_frames))
+
     # add pulses to frames only on odd-numbered samples
     print("Simulating pulses in training backgrounds")
     for sample_number, frame in enumerate(tqdm(training_frames)):
@@ -75,11 +87,14 @@ def make_labels(training_frames):
         simulate_pulse(frame, add_to_frame=True)
         ftdata[2*sample_number + 1, :, :] = frame.get_data()
 
-    # make array of alternating training labels
-    labels = np.zeros(2 * len(training_frames))
+        # give true signal a target slope
+        # no signal means 0 slope
+        slopes[2*sample_number + 1] = get_slope_in_pixels(frame)
+
+    # make every other label a 1 (contains signal)
     labels[1::2] = 1
 
-    return ftdata, labels
+    return ftdata, labels, slopes
 
 if __name__ == "__main__":
     # Read command line arguments
@@ -179,27 +194,23 @@ if __name__ == "__main__":
             print("Saving training set to " + training_set_name)
             np.save(training_set_name, training_frames)
 
-    ftdata, labels = make_labels(training_frames)
+    ftdata, labels, slopes = make_labels(training_frames)
 
     if args.enable_numba: # use numba-accelerated functions
         start_time = time()
         print('Scaling arrays...')
         utils.scale_data_numba(ftdata)
         print(f"Done scaling in {np.round((time() - start_time), 2)} seconds!\n")
-
-        start_time = time()
-        print('Splitting data into training and validation sets')
-        train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split_numba(ftdata, labels, args.train_val_split)
-        print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
     else:
         print('Scaling arrays...')
         utils.scale_data(ftdata)
         print(f"Done scaling in {np.round((time() - start_time), 2)} seconds!\n")
 
-        start_time = time()
-        print('Splitting data into training and validation sets')
-        train_ftdata, train_labels, val_ftdata, val_labels = utils.train_val_split(ftdata, labels, args.train_val_split)
-        print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
+    # split data into training and validation sets
+    start_time = time()
+    print('Splitting data into training and validation sets...')
+    train_ftdata, val_ftdata, train_labels, val_labels, train_slopes, val_slopes = train_test_split(ftdata, labels, slopes, train_size=args.train_val_split)
+    print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
 
     ftdata = None; del ftdata # free memory by deleting potentially huge array
 
@@ -219,8 +230,8 @@ if __name__ == "__main__":
     val_ftdata = val_ftdata[..., None]
 
     fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
-                saved_model_name=saved_model_name, weight_signal=args.weight_signal,
-                batch_size=args.batch_size, epochs=args.epochs)
+            train_slopes, val_slopes, saved_model_name=saved_model_name,
+            weight_signal=args.weight_signal, batch_size=args.batch_size, epochs=args.epochs)
 
     print(f"\nTraining and validating on {len(labels)} samples took {np.round((time() - start_time) / 60, 2)} minutes")
 

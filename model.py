@@ -2,16 +2,15 @@
 import tensorflow
 tensorflow.compat.v1.disable_eager_execution()
 
-from tensorflow.keras.models import Sequential, load_model
-from tensorflow.keras.layers import Activation, Dense, Dropout
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.layers import Input, Activation, Dense, Dropout
 from tensorflow.keras.layers import Conv2D, BatchNormalization
 from tensorflow.keras.layers import MaxPooling2D, GlobalMaxPooling2D
 
 from sklearn.metrics import precision_recall_fscore_support
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 
-def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=128,
-                    saved_model_name='best_model.h5', previous_model=None):
+def build_branch(input_layer, num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=128):
     """
     Parameters:
     ----------
@@ -23,54 +22,70 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
 
     Returns
     -------
-    cnn_2d : Keras model
+    model_branch : Keras model
         Model to be used on frequency-time data
     """
+    # create num_filters convolution filters, each of size 3x3
+    model_branch = Conv2D(num_filters, (3, 3), padding='same', input_shape=(None, None, 1))(input_layer)
+    model_branch = BatchNormalization()(model_branch) # standardize all inputs to activation function
+    model_branch = Activation('relu')(model_branch)
+    model_branch = MaxPooling2D(pool_size=(2, 2))(model_branch) # max pool to reduce the dimensionality
+
+    # repeat and double the filter size for each convolutional block to make this DEEP
+    for layer_number in range(2, num_conv_layers + 1):
+        num_filters *= 2
+        model_branch = Conv2D(num_filters, (3, 3), padding='same')(model_branch)
+        model_branch = BatchNormalization()(model_branch)
+        model_branch = Activation('relu')(model_branch)
+        model_branch = MaxPooling2D(pool_size=(2, 2))(model_branch)
+
+    # max pool all feature maps
+    model_branch = GlobalMaxPooling2D()(model_branch)
+
+    # run through two fully connected layers
+    model_branch = Dense(n_dense1, activation='relu')(model_branch)
+    model_branch = Dropout(0.4)(model_branch)
+
+    model_branch = Dense(n_dense2, activation='relu')(model_branch)
+    model_branch = Dropout(0.3)(model_branch)
+
+    return model_branch
+
+def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=128,
+                    saved_model_name='best_model.h5', previous_model=None):
 
     if previous_model is not None:
         print("Loading in previous model: " + previous_model)
-        cnn_2d = load_model(previous_model, compile=False)
+        model = load_model(previous_model, compile=False)
     else:
-        cnn_2d = Sequential(name=saved_model_name)
-
-        # create num_filters convolution filters, each of size 3x3
-        cnn_2d.add(Conv2D(num_filters, (3, 3), padding='same', input_shape=(None, None, 1), name='conv2d_1'))
-        cnn_2d.add(BatchNormalization(name='batch_norm_1')) # standardize all inputs to activation function
-        cnn_2d.add(Activation('relu', name='relu_1'))
-        cnn_2d.add(MaxPooling2D(pool_size=(2, 2), name='max_pool_1')) # max pool to reduce the dimensionality
-
-        # repeat and double the filter size for each convolutional block to make this DEEP
-        for layer_number in range(2, num_conv_layers + 1):
-            num_filters *= 2
-            cnn_2d.add(Conv2D(num_filters, (3, 3), padding='same', name=f'conv2d_{layer_number}'))
-            cnn_2d.add(BatchNormalization(name=f'batch_norm_{layer_number}'))
-            cnn_2d.add(Activation('relu', name=f'relu_{layer_number}'))
-            cnn_2d.add(MaxPooling2D(pool_size=(2, 2), name=f'max_pool_{layer_number}'))
-
-        # max pool all feature maps
-        cnn_2d.add(GlobalMaxPooling2D(name='global_max_pool'))
-
-        # run through two fully connected layers
-        fc_1 = cnn_2d.add(Dense(n_dense1, activation='relu', name='fc_1'))
-        dropout_1 = cnn_2d.add(Dropout(0.4, name='dropout_1'))
-
-        fc_2 = cnn_2d.add(Dense(n_dense2, activation='relu', name='fc_2'))
-        dropout_2 = cnn_2d.add(Dropout(0.3, name='dropout_2'))
+        input_layer = Input(shape=(None, None, 1))
 
         # predict what the label should be
-        pred_layer = cnn_2d.add(Dense(1, activation='sigmoid', name='sigmoid_output'))
+        class_branch = build_branch(input_layer, num_conv_layers, num_filters, n_dense1, n_dense2)
+        class_branch = Dense(1, activation='sigmoid', name='class_output')(class_branch)
 
-    return cnn_2d
+        slope_branch = build_branch(input_layer, num_conv_layers, num_filters, n_dense1, n_dense2)
+        slope_branch = Dense(1, activation='linear', name='slope_output')(slope_branch)
+
+        model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
+
+    return model
 
 def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
-                saved_model_name='best_model.h5', weight_signal=1.0,
-                batch_size=32, epochs=32):
+                train_slopes, val_slopes, saved_model_name='best_model.h5',
+                weight_signal=1.0, batch_size=32, epochs=32, classification_loss_weight=10):
     """Fit a model using the given training data and labels while
     validating each epoch. Continually save the model that improves
     on the best val_loss."""
 
+    # define loss for classification and regression and weight each loss
+    # classification is more important, so its weight should be > 1
+    loss_dict = {'class_output': 'binary_crossentropy', 'slope_output': 'mean_squared_error'}
+    loss_weights_dict = {'class_output': classification_loss_weight, 'slope_output': 1}
+
     # compile model and optimize using Adam
-    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['accuracy'])
+    model.compile(loss=loss_dict, loss_weights=loss_weights_dict,
+                    optimizer='adam', metrics=['accuracy'])
 
     # save model with lowest validation loss
     loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)
@@ -81,7 +96,7 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
     # stop training if validation loss doesn't improve after 15 epochs
     early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
 
-    model.fit(x=train_ftdata, y=train_labels, validation_data=(val_ftdata, val_labels),
-                class_weight={0: 1, 1: weight_signal}, batch_size=batch_size,
-                epochs=epochs, use_multiprocessing=True,
-                callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
+    model.fit(x=train_ftdata, y={'class_output': train_labels, 'slope_output': train_slopes},
+            validation_data=(val_ftdata, {'class_output': val_labels, 'slope_output': val_slopes}),
+            class_weight={0: 1, 1: weight_signal}, batch_size=batch_size, epochs=epochs,
+            callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
