@@ -58,7 +58,7 @@ def save_to_csv(csv_name, signal_freqs, signal_probs):
 
     if os.path.isfile(csv_name):
         loaded_data = np.loadtxt(csv_name, skiprows=1)
-        data = np.concatenate([loaded_data, data], axis=0)
+        data = np.concatenate([loaded_data, csv_data], axis=0)
 
     np.savetxt(csv_name, csv_data, fmt='%-10.5f', header=hdr)
 
@@ -237,6 +237,9 @@ if __name__ == "__main__":
 
         # save data to csv and/or pdf only if at least one signal was found
         if num_signals_in_file > 0:
+            if test_part == 1 and os.path.isfile(args.csv_name): # delete old file
+                os.remove(args.csv_name)
+
             # save frequencies and prediction probabilities to csv
             save_to_csv(args.csv_name, signal_freqs, signal_probs)
 
