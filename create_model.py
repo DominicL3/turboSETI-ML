@@ -238,7 +238,7 @@ if __name__ == "__main__":
     # load the best model saved to generate confusion matrix
     print("Evaluating on validation set to generate confusion matrix...")
     model = load_model(saved_model_name, compile=True)
-    pred_probs = model.predict(val_ftdata, verbose=1)[:, 0]
+    pred_probs = model.predict(val_ftdata, verbose=1)[0][:, 0]
 
     utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs,
                                 args.confusion_matrix, enable_numba=args.enable_numba)

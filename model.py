@@ -62,10 +62,10 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
 
         # predict what the label should be
         class_branch = build_branch(input_layer, num_conv_layers, num_filters, n_dense1, n_dense2)
-        class_branch = Dense(1, activation='sigmoid', name='class_output')(class_branch)
+        class_branch = Dense(1, activation='sigmoid', name='class')(class_branch)
 
         slope_branch = build_branch(input_layer, num_conv_layers, num_filters, n_dense1, n_dense2)
-        slope_branch = Dense(1, activation='linear', name='slope_output')(slope_branch)
+        slope_branch = Dense(1, activation='linear', name='slope')(slope_branch)
 
         model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
 
@@ -73,15 +73,15 @@ def construct_conv2d(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=1
 
 def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
                 train_slopes, val_slopes, saved_model_name='best_model.h5',
-                weight_signal=1.0, batch_size=32, epochs=32, classification_loss_weight=10):
+                weight_signal=1.0, batch_size=32, epochs=32, classification_loss_weight=1000):
     """Fit a model using the given training data and labels while
     validating each epoch. Continually save the model that improves
     on the best val_loss."""
 
     # define loss for classification and regression and weight each loss
     # classification is more important, so its weight should be > 1
-    loss_dict = {'class_output': 'binary_crossentropy', 'slope_output': 'mean_squared_error'}
-    loss_weights_dict = {'class_output': classification_loss_weight, 'slope_output': 1}
+    loss_dict = {'class': 'binary_crossentropy', 'slope': 'mean_squared_error'}
+    loss_weights_dict = {'class': classification_loss_weight, 'slope': 1}
 
     # compile model and optimize using Adam
     model.compile(loss=loss_dict, loss_weights=loss_weights_dict,
@@ -96,7 +96,7 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
     # stop training if validation loss doesn't improve after 15 epochs
     early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
 
-    model.fit(x=train_ftdata, y={'class_output': train_labels, 'slope_output': train_slopes},
-            validation_data=(val_ftdata, {'class_output': val_labels, 'slope_output': val_slopes}),
-            class_weight={0: 1, 1: weight_signal}, batch_size=batch_size, epochs=epochs,
+    model.fit(x=train_ftdata, y={'class': train_labels, 'slope': train_slopes},
+            validation_data=(val_ftdata, {'class': val_labels, 'slope': val_slopes}),
+            class_weight={'class': {0: 1, 1: weight_signal}}, batch_size=batch_size, epochs=epochs,
             callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
