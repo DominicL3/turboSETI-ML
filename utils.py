@@ -238,3 +238,21 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
     if confusion_matrix_name is not None:
         print("Saving confusion matrix to {}".format(confusion_matrix_name))
         fig_confusion.savefig(confusion_matrix_name, dpi=100)
+
+def get_slope_from_driftRate(frame):
+    """Convert drift rate from Hz/s to slope inpixels.
+    Assumes frame has metadata attribute with drift rate."""
+    drift_rate = frame.metadata['drift_rate']
+    slope_pixels = drift_rate / (frame.df/frame.dt)
+    return slope_pixels
+
+def get_driftRate_from_slope(data, slopes, freqs, obs_time):
+    """Converts array of slopes in pixel units to drift rates (Hz/s).
+    Assumes data is 3D, freqs is 2D, and slopes is a 1D array."""
+    freq_ranges = np.ptp(freqs, axis=1)
+    num_rows, num_cols = data.shape[1:3]
+    df = freq_ranges / num_cols # convert from MHz to Hz
+    dt = obs_time / num_rows
+
+    drift_rate = slopes * (df/dt)
+    return drift_rate
