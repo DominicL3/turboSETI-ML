@@ -54,13 +54,6 @@ def simulate_pulse(frame, add_to_frame=True):
                                             width=width,
                                             f_profile_type=f_profile_type)
 
-def get_slope_in_pixels(frame):
-    """Convert drift rate from Hz/s to
-    Assumes frame has metadata attribute with drift rate."""
-    drift_rate = frame.metadata['drift_rate']
-    slope_pixels = (frame.df/frame.dt) / drift_rate
-    return slope_pixels
-
 def make_labels(training_frames):
     # pre-allocate training data array using first frame
     f0 = training_frames[0]
