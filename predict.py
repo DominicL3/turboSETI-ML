@@ -40,8 +40,9 @@ def prep_batch_for_prediction(data, enable_numba=True):
 
     return data
 
-def save_to_csv(csv_name, signal_freqs, signal_probs):
-    """Save the frequencies and probabilities of predicted signals to CSV.
+def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates):
+    """Save the frequencies and probabilities of predicted signals to CSV
+    as well as the predicted drift rate of the signal.
     Assumes signal_freqs is a 2D array where each row is a frequency slice
     belonging to a predicted signal, and that signal_probs is a 1D array."""
 
@@ -51,10 +52,11 @@ def save_to_csv(csv_name, signal_freqs, signal_probs):
     max_freqs = np.max(signal_freqs, axis=1)
 
     # fill data matrix
-    csv_data = np.zeros([len(signal_freqs), 3], dtype=signal_freqs.dtype)
+    csv_data = np.zeros([len(signal_freqs), 4], dtype=signal_freqs.dtype)
     csv_data[:, 0] = min_freqs
     csv_data[:, 1] = max_freqs
     csv_data[:, 2] = signal_probs
+    csv_data[:, 3] = drift_rates
 
     if os.path.isfile(csv_name):
         loaded_data = np.loadtxt(csv_name, skiprows=1)
@@ -63,9 +65,9 @@ def save_to_csv(csv_name, signal_freqs, signal_probs):
     np.savetxt(csv_name, csv_data, fmt='%-10.5f', header=hdr)
 
 
-def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs):
+def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, drift_rates):
     """Save predicted signals to PDF, along with their corresponding
-    frequencies and prediction probabilities."""
+    frequencies, prediction probabilities, and drift rates."""
 
     # compute number of predictions per page by minimizing number of blank axes
     preds_per_page = 4 + np.argmax([(len(predicted_signals) % x) / x for x in np.arange(4, 9)])
@@ -87,11 +89,13 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs):
             signal = predicted_signals[i]
             freq = signal_freqs[i]
             prob = np.round(signal_probs[i], 4)
+            drift = drift_rates[i]
 
             # plot spectrogram
             ax[0].imshow(signal[:, ::-1], aspect='auto', origin='lower',
                         extent=[min(freq), max(freq), 0, t_end])
-            ax[0].set(xlabel='freq (MHz)', ylabel='time (s)', title=f"Prediction: {prob}")
+            ax[0].set(title=f'Prediction: {np.round(prob, 4)}, Drift rate: {np.round(drift, 4)} Hz/s',
+                        xlabel='freq (MHz)', ylabel='time (s)')
 
             # plot spectrum
             spectrum = np.mean(signal, axis=0)
@@ -188,7 +192,8 @@ if __name__ == "__main__":
         start_time = time()
         obs = Waterfall(candidate_file, f_start=f_start_max_filesize, f_stop=f_stop_max_filesize, max_load=12)
         print(f"Loading data took {np.round((time() - start_time)/60, 4)} min\n")
-        obs.freqs = obs.container.populate_freqs()
+        obs.freqs = obs.container.populate_freqs() # get frequencies for selection
+        t_end = obs.header['tsamp'] * obs.n_ints_in_file # observation time in seconds
 
         # copy data
         print("Copying data...")
@@ -217,9 +222,10 @@ if __name__ == "__main__":
         ftdata_test = prep_batch_for_prediction(ftdata_test, args.enable_numba)
         print(f"Scaling runtime: {np.round(time() - start_time, 4)} seconds\n")
 
-        # make prediction
+        # predict class and drift rate with model
         print("Predicting with model...")
-        pred_test = model.predict(ftdata_test, verbose=1)[:, 0]
+        pred_test, slopes_test = model.predict(ftdata_test, verbose=1)
+        pred_test = pred_test.flatten(); slopes_test = slopes_test.flatten()
 
         voted_signal_probs = pred_test > args.thresh # mask for arrays that were deemed true signals
 
@@ -227,18 +233,18 @@ if __name__ == "__main__":
         predicted_signals = ftdata_test[voted_signal_probs][:, :, :, 0]
         signal_freqs = freqs_test[voted_signal_probs]
         signal_probs = pred_test[voted_signal_probs]
+        drift_rates = utils.get_driftRate_from_slope(ftdata_test, slopes_test, freqs_test, t_end)
 
         # count number of predicted signals in file and add to running total
         num_signals_in_file = np.sum(voted_signal_probs)
         total_signals += num_signals_in_file
-
         print(f"\nNumber of signals in part {test_part}: {num_signals_in_file}")
         print(f"\nStoring info on {len(predicted_signals)} predicted candidates to {args.csv_name}")
 
         # save data to csv and/or pdf only if at least one signal was found
         if num_signals_in_file > 0:
             # save frequencies and prediction probabilities to csv
-            save_to_csv(args.csv_name, signal_freqs, signal_probs)
+            save_to_csv(args.csv_name, signal_freqs, signal_probs, drift_rates)
 
             if args.save_pdf:
                 # break pdf into parts if > 1 chunks are extracted
@@ -247,11 +253,8 @@ if __name__ == "__main__":
                 else:
                     pdf_name = f"{args.save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
 
-                # compute observation time in secondss
-                t_end = obs.header['tsamp'] * obs.n_ints_in_file
-
                 print(f"Saving images of {len(predicted_signals)} signals to {pdf_name}")
-                save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs)
+                save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, drift_rates)
 
         print(f"\nTotal signals found: {total_signals}")
         print(f"Elapsed runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
