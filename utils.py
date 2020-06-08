@@ -246,13 +246,13 @@ def get_slope_from_driftRate(frame):
     slope_pixels = drift_rate / (frame.df/frame.dt)
     return slope_pixels
 
-def get_driftRate_from_slope(data, slopes, freqs, obs_time):
+def get_driftRate_from_slope(slopes, waterfall_obs):
     """Converts array of slopes in pixel units to drift rates (Hz/s).
-    Assumes data is 3D, freqs is 2D, and slopes is a 1D array."""
-    freq_ranges = np.ptp(freqs, axis=1)
-    num_rows, num_cols = data.shape[1:3]
-    df = freq_ranges / num_cols # convert from MHz to Hz
-    dt = obs_time / num_rows
+    Assumes data is 3D, and waterfall_obs is a Waterfall object that
+    contains info on the channel bandwidth and sampling time."""
+
+    df = abs(waterfall_obs.header['foff']) * 1e6 # convert from MHz to Hz
+    dt = abs(waterfall_obs.header['tsamp']) # samplling time in seconds
 
     drift_rate = slopes * (df/dt)
     return drift_rate
