@@ -7,7 +7,7 @@ import os, argparse
 
 # neural net imports
 from tensorflow.keras.models import load_model
-from model import construct_conv2d, fit_model
+from model import construct_model, fit_model
 
 import generate_dataset, utils # make training set
 
@@ -210,8 +210,8 @@ if __name__ == "__main__":
     # disable file locking to save NN models
     os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
-    print("Constructing CNN with input parameters")
-    model = construct_conv2d(num_conv_layers=args.num_conv_layers, num_filters=args.num_filters,
+    print("Constructing CNN with given input parameters...")
+    model = construct_model(num_conv_layers=args.num_conv_layers, num_filters=args.num_filters,
                                 n_dense1=args.n_dense1, n_dense2=args.n_dense2,
                                 saved_model_name=saved_model_name, previous_model=previous_model)
     print(model.summary())
