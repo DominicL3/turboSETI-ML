@@ -74,10 +74,10 @@ def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
     # run through two fully connected layers
     # add Dropout for regularization (mitigate overfitting)
     fc_layers = Dense(n_dense1, activation='relu')(cnn_2d)
-    fc_layers = Dropout(0.4)(cnn_2d)
+    fc_layers = Dropout(0.25)(cnn_2d)
 
     fc_layers = Dense(n_dense2, activation='relu')(fc_layers)
-    fc_layers = Dropout(0.3)(fc_layers)
+    fc_layers = Dropout(0.25)(fc_layers)
 
     return fc_layers
 
@@ -123,13 +123,13 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
         cnn_2d = build_CNN(input_layer, num_conv_layers, num_filters)
 
         # predict what the class label should be
-        class_branch = build_FC(cnn_2d, inputs=input_layer, n_dense1, n_dense2)
+        class_branch = build_FC(cnn_2d, input_layer, n_dense1, n_dense2)
         class_branch = Dense(1, activation='sigmoid', name='class')(class_branch)
 
         # predict SLOPE with input image AND predicted class (drift rate calculated later)
         # network doesn't have access to channel bandwidth and sampling time
         # double the number of hidden neurons since drift rate is harder to predict than class
-        slope_branch = build_FC(cnn_2d, inputs=[input_layer, class_branch.output], n_dense1*2, n_dense2*2)
+        slope_branch = build_FC(cnn_2d, [input_layer, class_branch], n_dense1*2, n_dense2*2)
         slope_branch = Dense(1, activation='linear', name='slope')(slope_branch)
 
         model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
