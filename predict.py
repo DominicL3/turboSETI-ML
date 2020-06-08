@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
@@ -42,12 +43,12 @@ def prep_batch_for_prediction(data, enable_numba=True):
 
 def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates):
     """Save the frequencies and probabilities of predicted signals to CSV
-    as well as the predicted drift rate of the signal.
-    Assumes signal_freqs is a 2D array where each row is a frequency slice
-    belonging to a predicted signal, and that signal_probs is a 1D array."""
+    as well as the predicted drift rate of the signal. Assumes signal_freqs
+    is a 2D array where each row is a frequency slice belonging to a predicted
+    signal, and that signal_probs is a 1D array."""
 
     # compute min/max frequency window of every predicted signal
-    hdr = "Min freq (MHz), Max freq (MHz), Probability"
+    col_names = ["Min freq (MHz)", "Max freq (MHz)", "Probability", "Predicted Drift Rate (Hz/s)"]
     min_freqs = np.min(signal_freqs, axis=1)
     max_freqs = np.max(signal_freqs, axis=1)
 
@@ -58,12 +59,15 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates):
     csv_data[:, 2] = signal_probs
     csv_data[:, 3] = drift_rates
 
+    # convert data to pandas table
+    csv_data = pd.DataFrame(csv_data, columns=col_names)
+
+    # append predictions to file if it already exists
     if os.path.isfile(csv_name):
-        loaded_data = np.loadtxt(csv_name, skiprows=1)
-        data = np.concatenate([loaded_data, data], axis=0)
+        loaded_data = pd.read_csv(csv_name, sep='\t')
+        csv_data = loaded_data.append(csv_data, ignore_index=True)
 
-    np.savetxt(csv_name, csv_data, fmt='%-10.5f', header=hdr)
-
+    csv_data.to_csv(csv_name, sep='\t', index=False, float_format='%-10.5f')
 
 def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, drift_rates):
     """Save predicted signals to PDF, along with their corresponding
@@ -88,18 +92,18 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, 
             # extract random array with corresponding freqs and prediction probability
             signal = predicted_signals[i]
             freq = signal_freqs[i]
-            prob = np.round(signal_probs[i], 4)
+            prob = signal_probs[i]
             drift = drift_rates[i]
 
             # plot spectrogram
-            ax[0].imshow(signal[:, ::-1], aspect='auto', origin='lower',
+            ax[0].imshow(signal, aspect='auto', origin='lower',
                         extent=[min(freq), max(freq), 0, t_end])
-            ax[0].set(title=f'Prediction: {np.round(prob, 4)}, Drift rate: {np.round(drift, 4)} Hz/s',
+            ax[0].set(title=f"Index: {i}, Prediction: {prob:.4f}, Drift rate: {drift:.4f} Hz/s",
                         xlabel='freq (MHz)', ylabel='time (s)')
 
             # plot spectrum
             spectrum = np.mean(signal, axis=0)
-            ax[1].plot(freq[::-1], spectrum)
+            ax[1].plot(freq, spectrum)
             ax[1].set(xlabel='freq (MHz)', ylabel='power (counts)', title='Frequency Spectrum')
 
             # last plot, so save last page even if incomplete
@@ -233,7 +237,7 @@ if __name__ == "__main__":
         predicted_signals = ftdata_test[voted_signal_probs][:, :, :, 0]
         signal_freqs = freqs_test[voted_signal_probs]
         signal_probs = pred_test[voted_signal_probs]
-        drift_rates = utils.get_driftRate_from_slope(ftdata_test, slopes_test, freqs_test, t_end)
+        drift_rates = utils.get_driftRate_from_slope(slopes_test[voted_signal_probs], obs)
 
         # count number of predicted signals in file and add to running total
         num_signals_in_file = np.sum(voted_signal_probs)
