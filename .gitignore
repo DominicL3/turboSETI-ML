@@ -8,4 +8,8 @@
 *.h5
 scratch_space
 *.png
-tf2gpu*.yml
+*.yml
+
+# don't ignore these files
+!alienhuntmode_env.yml
+!voyager-NN-demo.ipynb
