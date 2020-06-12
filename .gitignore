@@ -4,7 +4,6 @@
 *.local
 *.pytest*
 *.vscode
-*.yml
 *.ipynb
 *.h5
 scratch_space
