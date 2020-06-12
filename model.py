@@ -74,7 +74,7 @@ def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
     # run through two fully connected layers
     # add Dropout for regularization (mitigate overfitting)
     fc_layers = Dense(n_dense1, activation='relu')(cnn_2d)
-    fc_layers = Dropout(0.25)(cnn_2d)
+    fc_layers = Dropout(0.25)(fc_layers)
 
     fc_layers = Dense(n_dense2, activation='relu')(fc_layers)
     fc_layers = Dropout(0.25)(fc_layers)
