@@ -41,7 +41,7 @@ def split(array, bins_per_array):
     split_array = np.zeros((int(np.ceil(total_bins/bins_per_array)), array.shape[0], bins_per_array),
                           dtype=array.dtype)
 
-    for i in numba.prange(len(split_array)):
+    for i in np.arange(len(split_array)):
         split_array[i] = array[:, i * bins_per_array:(i+1) * bins_per_array]
 
     if total_bins % bins_per_array != 0: # fix when unevenly split
@@ -113,43 +113,6 @@ def scale_data_numba(ftdata):
         rescaled_chunk[:, :] /= stddev # divide every 2D array by its stddev
 
         ftdata[chunk_idx] = rescaled_chunk
-
-def train_val_split(ftdata, labels, split_fraction):
-    """Split ftdata and labels into training and validation sets."""
-    NTRAIN = int(len(ftdata) * split_fraction) # split_fraction defines what proportion is training set
-
-    ind = np.arange(len(ftdata))
-    np.random.shuffle(ind)
-
-    # split indices into training and evaluation set
-    ind_train = ind[:NTRAIN]
-    ind_val = ind[NTRAIN:]
-
-    # split examples into training and test set based on randomized indices
-    train_ftdata, val_ftdata = ftdata[ind_train], ftdata[ind_val]
-    train_labels, val_labels = labels[ind_train], labels[ind_val]
-
-    return train_ftdata, train_labels, val_ftdata, val_labels
-
-@numba.njit(parallel=True)
-def train_val_split_numba(ftdata, labels, split_fraction):
-    """Literally the same function as train_val_split, but
-    runs with Numba for speed optimizations."""
-
-    NTRAIN = int(len(ftdata) * split_fraction) # split_fraction defines what proportion is training set
-
-    ind = np.arange(len(ftdata))
-    np.random.shuffle(ind)
-
-    # split indices into training and evaluation set
-    ind_train = ind[:NTRAIN]
-    ind_val = ind[NTRAIN:]
-
-    # split examples into training and test set based on randomized indices
-    train_ftdata, val_ftdata = ftdata[ind_train], ftdata[ind_val]
-    train_labels, val_labels = labels[ind_train], labels[ind_val]
-
-    return train_ftdata, train_labels, val_ftdata, val_labels
 
 def get_classification_results(y_true, y_pred):
     """ Take true labels (y_true) and model-predicted
@@ -275,3 +238,21 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
     if confusion_matrix_name is not None:
         print("Saving confusion matrix to {}".format(confusion_matrix_name))
         fig_confusion.savefig(confusion_matrix_name, dpi=100)
+
+def get_slope_from_driftRate(frame):
+    """Convert drift rate from Hz/s to slope inpixels.
+    Assumes frame has metadata attribute with drift rate."""
+    drift_rate = frame.metadata['drift_rate']
+    slope_pixels = drift_rate / (frame.df/frame.dt)
+    return slope_pixels
+
+def get_driftRate_from_slope(slopes, waterfall_obs):
+    """Converts array of slopes in pixel units to drift rates (Hz/s).
+    Assumes data is 3D, and waterfall_obs is a Waterfall object that
+    contains info on the channel bandwidth and sampling time."""
+
+    df = abs(waterfall_obs.header['foff']) * 1e6 # convert from MHz to Hz
+    dt = abs(waterfall_obs.header['tsamp']) # samplling time in seconds
+
+    drift_rate = slopes * (df/dt)
+    return drift_rate

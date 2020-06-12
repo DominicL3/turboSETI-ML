@@ -74,7 +74,7 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
         raise ValueError(f"path_to_files should be list or str type, not {type(path_to_files)}.")
 
     # if given None, sampling will continue until out of files or total_samples is achieved
-    if max_sampling_time is None:
+    if max_sampling_time == 0:
         max_sampling_time = np.inf
 
     print(f"Total number of files to possibly sample from: {len(files)}")
@@ -141,13 +141,13 @@ if __name__ == "__main__":
     # Default value of None means all time channels are used.
     parser.add_argument('-f', '--fchans', type=int, default=1024,
                         help='Number of frequency channels to extract for each training sample')
-    parser.add_argument('-t', '--tchans', type=int, default=None,
+    parser.add_argument('-t', '--tchans', type=int, default=16,
                         help='Number of time bins to extract for each training sample. If None, use entire integration time')
     parser.add_argument('-fs', '--f_shift', type=float, default=None,
                         help='Number of frequency channels from start of current frame to begin successive frame. If None, default to no overlap, i.e. f_shift=fchans).')
 
-    parser.add_argument('-max_time', '--max_sampling_time', type=int, default=600,
-                        help='Max amount of time (seconds) to sample from files before duplicating')
+    parser.add_argument('-max_time', '--max_sampling_time', type=float, default=600,
+                        help='Max amount of time (seconds) to sample from files before duplicating. If 0, there is no limit on the sampling time.')
 
     # save training set
     parser.add_argument('-s', '--save_name', type=str, default='training_set.npy',
