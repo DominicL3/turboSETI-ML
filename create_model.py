@@ -82,7 +82,7 @@ def make_labels(training_frames):
 
         # give true signal a target slope
         # no signal means 0 slope
-        slopes[2*sample_number + 1] = get_slope_in_pixels(frame)
+        slopes[2*sample_number + 1] = utils.get_slope_from_driftRate(frame)
 
     # make every other label a 1 (contains signal)
     labels[1::2] = 1
