@@ -41,7 +41,7 @@ def split(array, bins_per_array):
     split_array = np.zeros((int(np.ceil(total_bins/bins_per_array)), array.shape[0], bins_per_array),
                           dtype=array.dtype)
 
-    for i in numba.prange(len(split_array)):
+    for i in np.arange(len(split_array)):
         split_array[i] = array[:, i * bins_per_array:(i+1) * bins_per_array]
 
     if total_bins % bins_per_array != 0: # fix when unevenly split
