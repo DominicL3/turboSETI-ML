@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import numba # speed up NumPy
 import tqdm
+from skimage import filters, morphology, measure, transform # classically detect line in image
 
 """
 Helper functions for training neural network, including
@@ -256,3 +257,35 @@ def get_driftRate_from_slope(slopes, waterfall_obs):
 
     drift_rate = slopes * (df/dt)
     return drift_rate
+
+def hough_slope(ftdata):
+    """Detect line in image using triangle threshold and Hough transform.
+    Convert angle to slope in pixel units, to be later converted to drift
+    rate with knowledge of the sampling time/sampling frequency."""
+
+    # use triangle thresholding to remove most noisy bits
+    thresholded_data = ftdata >= filters.threshold_triangle(ftdata)
+
+    # remove small holes (salt and pepper noise)
+    thresholded_data = morphology.remove_small_objects(thresholded_data, min_size=3)
+
+    # segment image based on connected components, assuming longest component is desired signal
+    # @source Vincent Agnus, https://stackoverflow.com/questions/47540926/get-the-largest-connected-component-of-segmentation-image
+    segmented_data = measure.label(thresholded_data, connectivity=2)
+
+    if segmented_data.max() == 0: # if no connected components, fall back to using thresholded image
+        largestCC = thresholded_data
+    else:
+        largestCC = segmented_data == np.argmax(np.bincount(segmented_data.flat)[1:]) + 1
+
+    # find line and angle using Hough transform
+    tested_angles = np.linspace(-np.pi/2, np.pi/2, 360)
+    h, theta, d = transform.hough_line(largestCC, theta=tested_angles)
+
+    # pick best line using peak in Hough transform; might have no peaks and be set to None
+    angles = transform.hough_line_peaks(h, theta, d, num_peaks=1, min_distance=10)[1]
+
+    # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
+    slope_pixels = np.tan(-angles[0]) if angles else 0
+
+    return slope_pixels

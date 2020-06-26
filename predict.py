@@ -6,7 +6,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 # the astronomy imports
 from blimpy import Waterfall
 
-from tqdm import trange
+from tqdm import tqdm, trange
 from time import time
 import os, argparse
 import numba # speed up NumPy
@@ -41,14 +41,14 @@ def prep_batch_for_prediction(data, enable_numba=True):
 
     return data
 
-def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates):
+def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rates_hough=None):
     """Save the frequencies and probabilities of predicted signals to CSV
     as well as the predicted drift rate of the signal. Assumes signal_freqs
     is a 2D array where each row is a frequency slice belonging to a predicted
     signal, and that signal_probs is a 1D array."""
 
     # compute min/max frequency window of every predicted signal
-    col_names = ["Min freq (MHz)", "Max freq (MHz)", "Probability", "Predicted Drift Rate (Hz/s)"]
+    col_names = ["Min freq (MHz)", "Max freq (MHz)", "Probability", "ML Drift Rate (Hz/s)"]
     min_freqs = np.min(signal_freqs, axis=1)
     max_freqs = np.max(signal_freqs, axis=1)
 
@@ -57,7 +57,12 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates):
     csv_data[:, 0] = min_freqs
     csv_data[:, 1] = max_freqs
     csv_data[:, 2] = signal_probs
-    csv_data[:, 3] = drift_rates
+    csv_data[:, 3] = drift_rates_ML
+
+    # add extra column for Hough transform drift rates if enabled
+    if drift_rates_hough is not None:
+        col_names.append("Hough Drift Rate (Hz/s)")
+        csv_data = np.hstack([csv_data, drift_rates_hough.reshape(-1, 1)])
 
     # convert data to pandas table
     csv_data = pd.DataFrame(csv_data, columns=col_names)
@@ -69,7 +74,8 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates):
 
     csv_data.to_csv(csv_name, sep='\t', index=False, float_format='%-10.5f')
 
-def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, drift_rates):
+def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
+                    drift_rates_ML, drift_rates_hough=None):
     """Save predicted signals to PDF, along with their corresponding
     frequencies, prediction probabilities, and drift rates."""
 
@@ -93,18 +99,26 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, 
             signal = predicted_signals[i]
             freq = signal_freqs[i]
             prob = signal_probs[i]
-            drift = drift_rates[i]
+            drift_ML = drift_rates_ML[i]
+
+            # what to title frequency spectrum based on whether Hough drift rates are passed in
+            if drift_rates_hough is not None:
+                drift_hough = drift_rates_hough[i]
+                spec_title = f'Drift rate (ML): {drift_ML:.4f} Hz/s, Drift rate (Hough): {drift_hough:.4f} Hz/s'
+            else:
+                spec_title = f'Drift rate (ML): {drift_ML:.4f} Hz/s'
 
             # plot spectrogram
+            f_start, f_stop = np.min(freq), np.max(freq) # get start and end freqs
             ax[0].imshow(signal, aspect='auto', origin='lower',
-                        extent=[min(freq), max(freq), 0, t_end])
-            ax[0].set(title=f"Index: {i}, Prediction: {prob:.4f}, Drift rate: {drift:.4f} Hz/s",
+                        extent=[f_start, f_stop, 0, t_end])
+            ax[0].set(title=f"Index: {i}, Prediction: {prob:.4f}, Start/End Freqs (MHz): {f_start:.4f}-{f_stop:.4f}",
                         xlabel='freq (MHz)', ylabel='time (s)')
 
             # plot spectrum
             spectrum = np.mean(signal, axis=0)
             ax[1].plot(freq, spectrum)
-            ax[1].set(xlabel='freq (MHz)', ylabel='power (counts)', title='Frequency Spectrum')
+            ax[1].set(xlabel='freq (MHz)', ylabel='power (counts)', title=spec_title)
 
             # last plot, so save last page even if incomplete
             if i == len(predicted_signals) - 1:
@@ -149,6 +163,8 @@ if __name__ == "__main__":
                         help='Disable numba speed optimizations')
 
     # options to save outputs
+    parser.add_argument('--no_hough', dest='include_hough_drift', action='store_false',
+                        help='Do not compute drift rate from traditional Hough transforms.')
     parser.add_argument('-csv', '--csv_name', type=str, default='predictions.csv', help='Filename (csv) to save all predicted signals.')
     parser.add_argument('-pdf', '--save_pdf', type=str, default=None, help='Filename (pdf) to save all predicted signals.')
 
@@ -195,25 +211,17 @@ if __name__ == "__main__":
         # load in fil/h5 file into memory
         start_time = time()
         obs = Waterfall(candidate_file, f_start=f_start_max_filesize, f_stop=f_stop_max_filesize, max_load=12)
-        print(f"Loading data took {np.round((time() - start_time)/60, 4)} min\n")
+        print(f"Loading data took {(time() - start_time)/60:.4f} min\n")
+
+        ftdata_test = obs.data[:, 0] # grab 2D data
         obs.freqs = obs.container.populate_freqs() # get frequencies for selection
         t_end = obs.header['tsamp'] * obs.n_ints_in_file # observation time in seconds
-
-        # copy data
-        print("Copying data...")
-        if args.enable_numba:
-            ftdata_test = utils.copy_2d_data_numba(obs.data[:, 0])
-        else:
-            ftdata_test = utils.copy_2d_data(obs.data[:, 0])
-        print(f"Copying data took {np.round(time() - start_time, 4)} seconds\n")
-
-        obs.data = None # free up memory since obs.data isn't needed anymore
 
         # split 2D array into 3D array so each individual array has bins_per_array freq channels each
         print("Splitting array...")
         start_time = time()
         ftdata_test = split_data(ftdata_test, bins_per_array, args.enable_numba)
-        print(f"Split runtime: {np.round(time() - start_time, 4)} seconds\n")
+        print(f"Split runtime: {time() - start_time:.4f} seconds\n")
 
         # split up frequencies corresponding to data
         freqs_test = obs.freqs.reshape(1, -1)
@@ -224,7 +232,7 @@ if __name__ == "__main__":
         start_time = time()
         print("Scaling data and preparing batch for prediction...")
         ftdata_test = prep_batch_for_prediction(ftdata_test, args.enable_numba)
-        print(f"Scaling runtime: {np.round(time() - start_time, 4)} seconds\n")
+        print(f"Scaling runtime: {time() - start_time:.4f} seconds\n")
 
         # predict class and drift rate with model
         print("Predicting with model...")
@@ -237,7 +245,17 @@ if __name__ == "__main__":
         predicted_signals = ftdata_test[voted_signal_probs][:, :, :, 0]
         signal_freqs = freqs_test[voted_signal_probs]
         signal_probs = pred_test[voted_signal_probs]
-        drift_rates = utils.get_driftRate_from_slope(slopes_test[voted_signal_probs], obs)
+        drift_rates_ML = utils.get_driftRate_from_slope(slopes_test[voted_signal_probs], obs)
+
+        if args.include_hough_drift:
+            print("\nComputing drift rate from Hough transform...")
+            hough_slopes = np.zeros(np.sum(voted_signal_probs))
+            for i, data in enumerate(tqdm(predicted_signals)):
+                hough_slopes[i] = utils.hough_slope(data)
+
+            drift_rates_hough = utils.get_driftRate_from_slope(hough_slopes, obs)
+        else:
+            drift_rates_hough = None
 
         # count number of predicted signals in file and add to running total
         num_signals_in_file = np.sum(voted_signal_probs)
@@ -251,7 +269,8 @@ if __name__ == "__main__":
                 os.remove(args.csv_name)
 
             # save frequencies and prediction probabilities to csv
-            save_to_csv(args.csv_name, signal_freqs, signal_probs, drift_rates)
+            save_to_csv(args.csv_name, signal_freqs, signal_probs,
+                            drift_rates_ML, drift_rates_hough)
 
             if args.save_pdf:
                 # break pdf into parts if > 1 chunks are extracted
@@ -261,9 +280,10 @@ if __name__ == "__main__":
                     pdf_name = f"{args.save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
 
                 print(f"Saving images of {len(predicted_signals)} signals to {pdf_name}")
-                save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs, drift_rates)
+                save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
+                                drift_rates_ML, drift_rates_hough)
 
         print(f"\nTotal signals found: {total_signals}")
-        print(f"Elapsed runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
+        print(f"Elapsed runtime: {(time() - script_start_time)/60:.2f} minutes")
 
-    print(f"Total runtime: {np.round((time() - script_start_time) / 60, 2)} minutes")
+    print(f"Total runtime: {(time() - script_start_time)/60:.2f} minutes")
