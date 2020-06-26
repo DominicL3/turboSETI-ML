@@ -28,7 +28,6 @@ dependencies:
   - cudatoolkit=10.1.243
   - cudnn=7.6.5
   - cupti=10.1.168
-  - cupy=7.4.0
   - cycler=0.10.0
   - cython=0.29.19
   - dbus=1.13.6
@@ -192,6 +191,5 @@ dependencies:
     - pyqtchart==5.12
     - pyqtwebengine==5.12.1
     - setigen==1.2.8
-    - turbo-seti==1.2.2
-prefix: /home/dleduc/yes/envs/alienhuntmode
+prefix: /home/dleduc/miniconda3/envs/alienhuntmode
 
