@@ -7,10 +7,6 @@ from skimage import filters, morphology, measure, transform # classically detect
 
 from sklearn.linear_model import LinearRegression
 
-# debug Numba segmentation fault
-import faulthandler
-faulthandler.enable()
-
 """
 Helper functions for training neural network, including
 data preprocessing and computing training results.
@@ -231,17 +227,14 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
         fig_confusion.savefig(confusion_matrix_name, dpi=100)
 
 def get_slope_from_driftRate(frame):
-    """Convert drift rate from Hz/s to slope inpixels.
+    """Convert drift rate from Hz/s to slope in pixel units.
     Assumes frame has metadata attribute with drift rate."""
     drift_rate = frame.metadata['drift_rate']
     slope_pixels = drift_rate / (frame.df/frame.dt)
     return slope_pixels
 
 def get_driftRate_from_slope(slopes, df, dt):
-    """Converts array of slopes in pixel units to drift rates (Hz/s).
-    Assumes data is 3D, and waterfall_obs is a Waterfall object that
-    contains info on the channel bandwidth and sampling time."""
-
+    """Converts array of slopes in pixel units to drift rates (Hz/s)."""
     drift_rate = slopes * (df/dt)
     return drift_rate
 
@@ -277,8 +270,10 @@ def hough_slope(ftdata):
 
     lin_reg = LinearRegression()
     y, x = np.where(largestCC)
-    lin_reg.fit(x.reshape(-1, 1), y)
-
-    slope_pixels = lin_reg.coef_
+    try:
+        lin_reg.fit(x.reshape(-1, 1), y)
+        slope_pixels = lin_reg.coef_[0]
+    except:
+        slope_pixels = 0
 
     return slope_pixels
