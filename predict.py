@@ -19,11 +19,6 @@ import gc # garbage collect every now and then
 from tensorflow.keras.models import load_model
 import utils
 
-### debug why Numba is breaking ###
-import faulthandler
-faulthandler.enable()
-# from memory_profiler import profile
-###################################
 
 # used for reading in h5 files
 os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
@@ -36,7 +31,7 @@ def split_data(data, bins_per_array, enable_numba=True):
         data = utils.split(data, bins_per_array)
     return data
 
-def prep_batch_for_prediction(data, num_cores=1, enable_numba=True):
+def prep_batch_for_prediction(data, enable_numba=True):
     # normalize each spectrum in an array to 0 median and global stddev to 1
     if enable_numba:
         utils.scale_data_numba(data)
@@ -132,7 +127,6 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
                 pdf.savefig(fig_narrowband, dpi=80)
                 plt.close(fig_narrowband)
 
-# @profile
 def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
                     include_hough_drift=True, enable_numba=True, num_cores=0, save_pdf=None):
     # load in fil/h5 file into memory
@@ -145,14 +139,12 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
     print("Splitting array...")
     start_time = time()
     ftdata_test = split_data(ftdata_test, bins_per_array, enable_numba)
-    obs_ftdata = None
     print(f"Split runtime: {time() - start_time:.4f} seconds")
     print(f"Split array has shape {ftdata_test.shape}\n")
 
     # split up frequencies corresponding to data
     freqs_test = split_data(freqs_test.reshape(1, -1), bins_per_array, enable_numba)
     freqs_test = freqs_test[:, 0] # remove extra dimension created to split_data
-    obs_freqs_test = None
 
     # delete large variable and run garbage collection
     gc.collect()
@@ -160,7 +152,7 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
     # scale candidate arrays and add channel dimension for Keras
     start_time = time()
     print("Scaling data and preparing batch for prediction...")
-    ftdata_test = prep_batch_for_prediction(ftdata_test, num_cores=num_cores, enable_numba=enable_numba)
+    ftdata_test = prep_batch_for_prediction(ftdata_test, enable_numba=enable_numba)
     print(f"Scaling runtime: {time() - start_time:.4f} seconds\n")
 
     # predict class and drift rate with model
