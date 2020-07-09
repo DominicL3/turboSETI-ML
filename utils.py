@@ -1,8 +1,15 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import numba # speed up NumPy
-import tqdm
+import multiprocessing as mp
+from tqdm import tqdm, trange
 from skimage import filters, morphology, measure, transform # classically detect line in image
+
+from sklearn.linear_model import LinearRegression
+
+# debug Numba segmentation fault
+import faulthandler
+faulthandler.enable()
 
 """
 Helper functions for training neural network, including
@@ -10,21 +17,6 @@ data preprocessing and computing training results.
 
 @source Liam Connor (https://github.com/liamconnor/single_pulse_ml)
 """
-
-def copy_2d_data(data):
-    """Return a copy of a 2D array."""
-    return np.copy(data)
-
-@numba.njit(parallel=True)
-def copy_2d_data_numba(data):
-    """Return a copy of a 2D array,
-    but with Numba speedup."""
-    num_rows, num_cols = data.shape
-    copied_array = np.zeros(data.shape)
-    for i in numba.prange(num_rows):
-        for j in numba.prange(num_cols):
-            copied_array[i, j] = data[i, j]
-    return copied_array
 
 def split(array, bins_per_array):
     """
@@ -36,14 +28,14 @@ def split(array, bins_per_array):
         split_array : numpy.ndarray
             Array after splitting.
     """
-
     total_bins = array.shape[1]
 
     split_array = np.zeros((int(np.ceil(total_bins/bins_per_array)), array.shape[0], bins_per_array),
-                          dtype=array.dtype)
+                            dtype=array.dtype)
 
-    for i in np.arange(len(split_array)):
-        split_array[i] = array[:, i * bins_per_array:(i+1) * bins_per_array]
+    for i in trange(len(split_array)):
+        extracted_chunk = array[:, i * bins_per_array:(i+1) * bins_per_array]
+        split_array[i, :, :extracted_chunk.shape[1]] = extracted_chunk
 
     if total_bins % bins_per_array != 0: # fix when unevenly split
         # last array currently only filled partially
@@ -52,7 +44,6 @@ def split(array, bins_per_array):
 
     return split_array
 
-# chop_off WITH Numba support
 @numba.njit(parallel=True)
 def split_numba(array, bins_per_array):
     """
@@ -70,10 +61,11 @@ def split_numba(array, bins_per_array):
     total_bins = array.shape[1]
 
     split_array = np.zeros((int(np.ceil(total_bins/bins_per_array)), array.shape[0], bins_per_array),
-                          dtype=array.dtype)
+                            dtype=array.dtype)
 
     for i in numba.prange(len(split_array)):
-        split_array[i] = array[:, i * bins_per_array:(i+1) * bins_per_array]
+        extracted_chunk = array[:, i * bins_per_array:(i+1) * bins_per_array]
+        split_array[i, :, :extracted_chunk.shape[1]] = extracted_chunk
 
     if total_bins % bins_per_array != 0: # fix when unevenly split
         # last array currently only filled partially
@@ -87,14 +79,12 @@ def scale_data(ftdata):
     divide each array by its global standard deviation. Perform
     this standardization in chunks to avoid a memory overload."""
 
-    N = 10000
-    for i in tqdm.trange(int(np.ceil(len(ftdata)/float(N)))):
-        ftdata_chunk = ftdata[i*N:(i + 1) * N]
-        medians = np.median(ftdata_chunk, axis=1)[:, :, np.newaxis]
-        stddev = np.std(ftdata_chunk.reshape(len(ftdata_chunk), -1), axis=-1)[:, np.newaxis, np.newaxis]
+    for arr in tqdm(ftdata):
+        stddev = np.std(arr)
 
-        scaled_ftdata = (ftdata_chunk - medians) / stddev
-        ftdata[i*N:(i + 1) * N] = scaled_ftdata
+        # subtract median from each row (spectrum) and divide every 2D array by its global stddev
+        arr -= np.median(arr, axis=1, keepdims=True)
+        arr /= stddev
 
 # rescaling with Numba
 @numba.njit(parallel=True)
@@ -111,7 +101,7 @@ def scale_data_numba(ftdata):
         stddev = np.std(rescaled_chunk)
         for row_idx in numba.prange(num_rows): # subtract median from each row
             rescaled_chunk[row_idx, :] -= np.median(rescaled_chunk[row_idx, :])
-        rescaled_chunk[:, :] /= stddev # divide every 2D array by its stddev
+        rescaled_chunk /= stddev # divide every 2D array by its stddev
 
         ftdata[chunk_idx] = rescaled_chunk
 
@@ -247,13 +237,10 @@ def get_slope_from_driftRate(frame):
     slope_pixels = drift_rate / (frame.df/frame.dt)
     return slope_pixels
 
-def get_driftRate_from_slope(slopes, waterfall_obs):
+def get_driftRate_from_slope(slopes, df, dt):
     """Converts array of slopes in pixel units to drift rates (Hz/s).
     Assumes data is 3D, and waterfall_obs is a Waterfall object that
     contains info on the channel bandwidth and sampling time."""
-
-    df = abs(waterfall_obs.header['foff']) * 1e6 # convert from MHz to Hz
-    dt = abs(waterfall_obs.header['tsamp']) # samplling time in seconds
 
     drift_rate = slopes * (df/dt)
     return drift_rate
@@ -279,13 +266,19 @@ def hough_slope(ftdata):
         largestCC = segmented_data == np.argmax(np.bincount(segmented_data.flat)[1:]) + 1
 
     # find line and angle using Hough transform
-    tested_angles = np.linspace(-np.pi/2, np.pi/2, 360)
-    h, theta, d = transform.hough_line(largestCC, theta=tested_angles)
+    # tested_angles = np.linspace(-np.pi/2, np.pi/2, 360)
+    # h, theta, d = transform.hough_line(largestCC, theta=tested_angles)
 
-    # pick best line using peak in Hough transform; might have no peaks and be set to None
-    angles = transform.hough_line_peaks(h, theta, d, num_peaks=1, min_distance=10)[1]
+    # # pick best line using peak in Hough transform; might have no peaks and be set to None
+    # angles = transform.hough_line_peaks(h, theta, d, num_peaks=1, min_distance=10)[1]
 
-    # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
-    slope_pixels = np.tan(-angles[0]) if angles else 0
+    # # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
+    # slope_pixels = np.tan(-angles[0]) if angles else 0
+
+    lin_reg = LinearRegression()
+    y, x = np.where(largestCC)
+    lin_reg.fit(x.reshape(-1, 1), y)
+
+    slope_pixels = lin_reg.coef_
 
     return slope_pixels
