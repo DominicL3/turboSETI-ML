@@ -23,17 +23,18 @@ narrowband signals with randomly generated signal properties.
 @source Bryan Brzycki (https://github.com/bbrzycki/setigen)
 """
 
-def simulate_pulse(frame, add_to_frame=True):
+def simulate_pulse(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5,
+                        SNRmin=10, SNRsigma=1, add_to_frame=True):
     """Generate dataset, taken from setigen docs (advanced topics)."""
     fchans = frame.fchans
 
     # let true pulse begin in middle 50% of array and randomize drift rate
     start_index = np.random.randint(0.25 * fchans, 0.75 * fchans)
-    drift_rate = np.random.uniform(-5, 5)
+    drift_rate = np.random.uniform(min_drift, max_drift)
 
     # sample SNR and frequency profile randomly
-    random_SNR = 10 + np.random.lognormal(mean=1.0, sigma=1.0)
-    width = np.random.uniform(10, 40)
+    random_SNR = SNRmin + np.random.lognormal(mean=1.0, sigma=SNRsigma)
+    width = np.random.uniform(min_width, max_width)
     f_profile_type = np.random.choice(['box', 'gaussian', 'lorentzian', 'voigt'])
 
     # add metadata to each frame for bookkeeping purposes
