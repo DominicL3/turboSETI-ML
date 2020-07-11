@@ -2,6 +2,7 @@ import numpy as np
 
 # simulate pulses
 import setigen as stg
+from astropy.stats import sigma_clip
 
 from time import time
 import os, sys, glob, tqdm
@@ -12,7 +13,18 @@ import copy
 @source Bryan Brzycki (https://github.com/bbrzycki)
 """
 
-def extract_frames(fname, training_frames, fchans=1024, tchans=None,
+def get_data_stats(wt_obs):
+    clipped_data = sigma_clip(stg.waterfall_utils.get_data(wt_obs),
+                                  sigma=3,
+                                  maxiters=5,
+                                  masked=False)
+    x_mean = np.mean(clipped_data)
+    x_std = np.std(clipped_data)
+    x_min = np.min(clipped_data)
+
+    return x_mean, x_std, x_min
+
+def extract_frames(fname, means, stddevs, mins, fchans=1024, tchans=None,
                     f_shift=None, samples_per_file=50, total_samples=1000):
     """
     Given a filename, takes time samples from filterbank file
@@ -29,17 +41,20 @@ def extract_frames(fname, training_frames, fchans=1024, tchans=None,
     # grab samples_per_file number of samples from filterbank file
     waterfall_itr = stg.split_waterfall_generator(fname, fchans, tchans, f_shift=f_shift)
 
-    # grab background samples from observation and simulate pulse
+    # grab background samples from observation
     for sample_number in tqdm.trange(samples_per_file):
-        if len(training_frames) < total_samples:
+        if len(means) < total_samples:
             try: # make setigen frame if next iteration is possible
                 wt_obs = next(waterfall_itr)
-                frame = stg.Frame(waterfall=wt_obs)
+                x_mean, x_std, x_min = get_data_stats(wt_obs)
             except StopIteration: # break if we reach end of file
                 print("End of file, reduce f_shift or samples_per_file if this keeps happening.")
                 break
 
-            training_frames.append(frame) # add frame to list of frames
+            means.append(x_mean)
+            stddevs.append(x_std)
+            mins.append(x_min)
+
         else:
             break
 
@@ -60,8 +75,7 @@ def duplicate_samples(current_samples, total_samples):
 
 def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
             samples_per_file=50, total_samples=1000, max_sampling_time=600):
-    start_time = time()
-    training_frames = []
+    means, stddevs, mins = [], [], []
 
     # sample files that follow regex pattern of path_to_files
     # so path_to_files = './*0000.fil' would sample all files
@@ -92,7 +106,7 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
 
     i = 0
     loop_start = time()
-    while len(training_frames) < total_samples:
+    while len(means) < total_samples:
         elapsed_time = time() - loop_start
         print(f"Elapsed time: {np.round(elapsed_time / 60, 2)} minutes")
 
@@ -106,7 +120,7 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
             # augment training set with duplicates
             # beware! if too many duplicates, model will not generalize well
             print("Duplicating samples...")
-            duplicate_samples(training_frames, total_samples)
+            # duplicate_samples(training_frames, total_samples)
             break
 
         # pick a random filterbank file from directory
@@ -114,19 +128,17 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
         print(f"\nSampling file ({i}/{len(files)}): " + str(rand_filename))
 
         # get information and append to growing list of samples
-        extract_frames(fname=rand_filename, training_frames=training_frames,
+        extract_frames(fname=rand_filename, means=means, stddevs=stddevs, mins=mins,
                         fchans=fchans, tchans=tchans, f_shift=f_shift,
                         samples_per_file=samples_per_file, total_samples=total_samples)
 
         i += 1
-        print("Number of samples after scan: " + str(len(training_frames)))
+        print("Number of samples after scan: " + str(len(means)))
 
     print(f"\nUnique number of files used: {i}")
 
-    training_frames = np.array(training_frames)
-
-    print(f"Training set creation time: {np.round((time() - start_time) / 60, 4)} min")
-    return training_frames
+    means, stddevs, mins = np.array(means), np.array(stddevs), np.array(mins)
+    return means, stddevs, mins
 
 if __name__ == "__main__":
     # Read command line arguments
@@ -150,7 +162,7 @@ if __name__ == "__main__":
                         help='Max amount of time (seconds) to sample from files before duplicating. If 0, there is no limit on the sampling time.')
 
     # save training set
-    parser.add_argument('-s', '--save_name', type=str, default='training_set.npy',
+    parser.add_argument('-s', '--save_name', type=str, default='training_set.npz',
                         help='Filename to save training set')
 
     args = parser.parse_args()
@@ -166,9 +178,15 @@ if __name__ == "__main__":
     max_sampling_time = args.max_sampling_time
     save_name = args.save_name
 
-    training_frames = main(path_to_files, fchans, tchans, f_shift,
-                            samples_per_file, total_samples, max_sampling_time)
+    script_start_time = time()
+
+    means, stddevs, mins = main(path_to_files, fchans, tchans, f_shift,
+                                samples_per_file, total_samples, max_sampling_time)
 
     # save final array to disk
     print("Saving data to " + save_name)
-    np.save(save_name, training_frames)
+    np.savez(save_name, means=means, stddevs=stddevs, mins=mins)
+
+    print(f"Training set creation time: {(time() - script_start_time) / 60:.4f)} min")
+
+
