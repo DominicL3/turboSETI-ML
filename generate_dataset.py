@@ -87,6 +87,9 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
     else:
         raise ValueError(f"path_to_files should be list or str type, not {type(path_to_files)}.")
 
+    if not files:
+        raise ValueError(f"No files found with path {path_to_files}")
+
     # if given None, sampling will continue until out of files or total_samples is achieved
     if max_sampling_time == 0:
         max_sampling_time = np.inf
@@ -94,37 +97,25 @@ def main(path_to_files, fchans=1024, tchans=None, f_shift=None,
     print(f"Total number of files to possibly sample from: {len(files)}")
     print(f"Total number of samples to get: {total_samples}")
 
-    if not files:
-        raise ValueError(f"No files found with path {path_to_files}")
-
-    # choose number of files to sample from based on
-    # user-inputted sample size or initial number of files
-    num_files = len(files)
-
     print(f"Randomly grabbing {samples_per_file} samples from each file")
-    random_files = np.random.choice(files, size=num_files, replace=False)
+    np.random.shuffle(files) # randomize order of files to sample from
 
     i = 0
     loop_start = time()
     while len(means) < total_samples:
         elapsed_time = time() - loop_start
-        print(f"Elapsed time: {np.round(elapsed_time / 60, 2)} minutes")
+        print(f"Elapsed time: {elapsed_time / 60:.2f} minutes")
 
         # end scanning if we looked through all files or takes too long
-        if i >= len(random_files) or elapsed_time >= max_sampling_time:
-            if i >= len(random_files):
+        if i >= len(files) or elapsed_time >= max_sampling_time:
+            if i >= len(files):
                 print("\nOut of files to sample without replacement. Either increase samples_per_file or find more files to sample from.")
             if elapsed_time >= max_sampling_time:
                 print("\nExceeded max sampling time.")
-
-            # augment training set with duplicates
-            # beware! if too many duplicates, model will not generalize well
-            print("Duplicating samples...")
-            # duplicate_samples(training_frames, total_samples)
             break
 
         # pick a random filterbank file from directory
-        rand_filename = random_files[i]
+        rand_filename = files[i]
         print(f"\nSampling file ({i}/{len(files)}): " + str(rand_filename))
 
         # get information and append to growing list of samples
@@ -158,7 +149,7 @@ if __name__ == "__main__":
     parser.add_argument('-fs', '--f_shift', type=float, default=None,
                         help='Number of frequency channels from start of current frame to begin successive frame. If None, default to no overlap, i.e. f_shift=fchans).')
 
-    parser.add_argument('-max_time', '--max_sampling_time', type=float, default=600,
+    parser.add_argument('-max_time', '--max_sampling_time', type=float, default=0,
                         help='Max amount of time (seconds) to sample from files before duplicating. If 0, there is no limit on the sampling time.')
 
     # save training set
@@ -183,10 +174,10 @@ if __name__ == "__main__":
     means, stddevs, mins = main(path_to_files, fchans, tchans, f_shift,
                                 samples_per_file, total_samples, max_sampling_time)
 
+    print(f"Ended with {len(means)} out of {total_samples} samples.")
+
     # save final array to disk
     print("Saving data to " + save_name)
     np.savez(save_name, means=means, stddevs=stddevs, mins=mins)
 
-    print(f"Training set creation time: {(time() - script_start_time) / 60:.4f)} min")
-
-
+    print(f"\nTraining set creation time: {(time() - script_start_time) / 60:.2f} min")

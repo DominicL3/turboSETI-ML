@@ -1,15 +1,20 @@
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-from tqdm import tqdm
+import setigen as stg
+
+import tqdm
+from tqdm.contrib.concurrent import process_map # parallel processes with progress bar
 from time import time
 import os, argparse
+
+import multiprocessing as mp # for parallel code execution
 
 # neural net imports
 from tensorflow.keras.models import load_model
 from model import construct_model, fit_model
 
-import generate_dataset, utils # make training set
+import generate_dataset, utils # for sampling parameter distributions
 
 """
 Train a Keras model to do binary classification on simulated pulses
@@ -23,7 +28,7 @@ narrowband signals with randomly generated signal properties.
 @source Bryan Brzycki (https://github.com/bbrzycki/setigen)
 """
 
-def simulate_pulse(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5,
+def simulate_signal(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5,
                         SNRmin=10, SNRsigma=1, add_to_frame=True):
     """Generate dataset, taken from setigen docs (advanced topics)."""
     fchans = frame.fchans
@@ -55,38 +60,73 @@ def simulate_pulse(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5,
                                             width=width,
                                             f_profile_type=f_profile_type)
 
-def make_labels(training_frames):
-    # pre-allocate training data array using first frame
-    f0 = training_frames[0]
-    fchans, tchans = f0.fchans, f0.tchans
-    print(f'Number of frequency channels per sample: {fchans}')
-    print(f'Number of time bins per sample: {tchans}')
-    print('\n')
+def parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq, means, stddevs, mins):
+    """Takes arguments for frame and condenses it into one tuple
+    to be passed into make_artificial_frame(). Used for multiprocessing,
+    since parallel processes only take in one argument."""
 
-    # preallocate array with twice as many samples as there are frames
-    # each frame will be used, once with purely background and once with injected pulse
-    ftdata = np.zeros([2 * len(training_frames), tchans, fchans], dtype=f0.get_data().dtype)
+    frame_args = [fchans, tchans, df, dt, min_freq, max_freq]
+    distribution_args = [means, stddevs, mins]
 
-    # make array of alternating training labels
-    labels = np.zeros(2 * len(training_frames))
-    slopes = np.zeros(2 * len(training_frames))
+    return (frame_args, distribution_args)
+
+def make_artificial_frame(simulation_args):
+    # unpack arguments
+    frame_args, distribution_args = simulation_args
+    fchans, tchans, df, dt, min_freq, max_freq = frame_args
+    means, stddevs, mins = distribution_args
+
+    # randomly sample frequency at end of array
+    fch1 = np.random.uniform(min_freq + df * fchans, max_freq)
+
+    # create setigen frame with frame args
+    frame = stg.Frame(fchans=fchans, tchans=tchans, df=df, dt=dt, fch1=fch1)
+
+    # add chi-squared noise to frame using distribution args
+    noise = frame.add_noise_from_obs(means, stddevs, mins, noise_type='chi2')
+
+    # add signal to frame and append to training_frames
+    simulate_signal(frame, add_to_frame=True)
+    signal = frame.get_data()
+
+    # give true signal a target slope and slope of 0 to noise
+    slope = utils.get_slope_from_driftRate(frame)
+
+    return noise, signal, slope
+
+def make_labels(num_samples, fchans, tchans, df, dt, min_freq, max_freq, means, stddevs, mins, num_cores=0):
+    # pre-allocate arrays for ftdata and slopes
+    ftdata = np.zeros([2 * num_samples, tchans, fchans])
+    slopes = np.zeros(2 * num_samples)
+
+    # make array of alternating training labels (faster than for loop)
+    labels = np.zeros(2 * num_samples)
+    labels[1::2] = 1
+
+    # compactify all arguments into one tuple for multiprocessing
+    simulation_args = parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq, means, stddevs, mins)
 
     # add pulses to frames only on odd-numbered samples
     print("Simulating pulses in training backgrounds")
-    for sample_number, frame in enumerate(tqdm(training_frames)):
-        # add blank observation to training set
-        ftdata[2*sample_number, :, :] = np.copy(frame.get_data())
 
-        # add signal to frame
-        simulate_pulse(frame, add_to_frame=True)
-        ftdata[2*sample_number + 1, :, :] = frame.get_data()
+    # create artificial frames and save them into training data
+    if num_cores == 0: # make training data serially (single-core)
+        for sample_number in tqdm.trange(num_samples):
+            noise, signal, slope = make_artificial_frame(simulation_args)
+            ftdata[2*sample_number, :, :] = noise
+            ftdata[2*sample_number + 1, :, :] = signal
+            slopes[2*sample_number + 1] = slope # set slope of noise to 0
+    else:
+        # duplicate simulation_args for parallel processes
+        simulation_args_iterable = simulation_args * num_samples
+        with mp.Pool(num_cores) as pool:
+            result = pool.imap(make_artificial_frame, simulation_args_iterable)
+            for sample_number in tqdm.trange(num_samples):
+                noise, signal, slope = next(result)
 
-        # give true signal a target slope
-        # no signal means 0 slope
-        slopes[2*sample_number + 1] = utils.get_slope_from_driftRate(frame)
-
-    # make every other label a 1 (contains signal)
-    labels[1::2] = 1
+                ftdata[2*sample_number, :, :] = noise
+                ftdata[2*sample_number + 1, :, :] = signal
+                slopes[2*sample_number + 1] = slope # set slope of noise to 0
 
     return ftdata, labels, slopes
 
@@ -94,7 +134,7 @@ if __name__ == "__main__":
     # Read command line arguments
     parser = argparse.ArgumentParser()
 
-    ### SIMULATION PARAMETERS ###
+    ### SETIGEN FRAME PARAMETERS ###
     parser.add_argument('-p', '--path_to_files', nargs='+', type=str,
                         help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
 
@@ -103,16 +143,28 @@ if __name__ == "__main__":
                         help='Number of training samples to extract from each filterbank file')
 
     # control number of freq/time channels from each array.
-    # Default value of None means all time channels are used.
+    # Default value of None means entire time integration is used.
     parser.add_argument('-f', '--fchans', type=int, default=1024,
                         help='Number of frequency channels to extract for each training sample')
-    parser.add_argument('-t', '--tchans', type=int, default=None,
+    parser.add_argument('-t', '--tchans', type=int, default=16,
                         help='Number of time bins to extract for each training sample. If None, use entire integration time')
     parser.add_argument('-fs', '--f_shift', type=float, default=None,
                         help='Number of frequency channels to extract for each training sample')
+    parser.add_argument('-df', '--bandwidth', type=float, default=2.8, help='Frequency bandwidth; i.e. Hz per channel for simulated arrays.')
+    parser.add_argument('-dt', '--sampling_time', type=float, default=18, help='Sampling time; number of seconds between bins for simulated arrays.')
+    parser.add_argument('-fmin', '--min_freq', type=float, default=4e9, help='Minimum frequency (Hz) for simulated arrays.')
+    parser.add_argument('-fmax', '--max_freq', type=float, default=8e9, help='Maximum frequency (Hz) for simulated arrays.')
 
     parser.add_argument('-max_time', '--max_sampling_time', type=int, default=600,
                         help='Max amount of time (seconds) to sample from files before duplicating')
+
+    ### SIGNAL PARAMETERS (SNR, width, drift rate, etc.) ###
+    # parameters for signal-to-noise ratio of FRB
+    parser.add_argument('--SNRmin', type=float, default=10, help='Minimum SNR of signals.')
+    parser.add_argument('--SNRsigma', type=float, default=1, help='Sigma of log-normal distribution for SNRs.')
+    parser.add_argument('-drift', '--drift_rate', nargs=2, type=float, default=[-5, 5],
+                            help='Min/max value for uniformly distributed drift rates (Hz/s)')
+    parser.add_argument('--width', nargs=2, type=float, default=[10, 40], help='Min/max value for signal widths.')
 
     # save training set
     parser.add_argument('--save_training_set', type=str, default=None,
@@ -120,7 +172,7 @@ if __name__ == "__main__":
 
     # load in previously created training set
     parser.add_argument('-l', '--load_training', type=str, default=None,
-                        help='Filename to load previously created training set (.npy file)')
+                        help='Filename to load previously created training set (.npz file)')
 
     ### MODEL PARAMETERS ###
     # parameters for convolutional layers
@@ -132,15 +184,10 @@ if __name__ == "__main__":
     parser.add_argument('-d1', '--n_dense1', type=int, default=256, help='Number of neurons in first dense layer')
     parser.add_argument('-d2', '--n_dense2', type=int, default=128, help='Number of neurons in second dense layer')
 
-    # parameters for signal-to-noise ratio of FRB
-    parser.add_argument('--SNRmin', type=float, default=8.0, help='Minimum SNR for FRB signal')
-    parser.add_argument('--SNR_sigma', type=float, default=1.0, help='Standard deviation of SNR from log-normal distribution')
-    parser.add_argument('--SNRmax', type=float, default=30.0, help='Maximum SNR of FRB signal')
-
     parser.add_argument('-w', '--weight_signal', type=float, default=1.0,
                         help='Class weight of true signal, used to favor false positives (< 1) or false negatives (> 1)')
 
-    parser.add_argument('-split_frac', '--train_val_split', type=float, default=0.5, help='Ratio to divide training and validation sets.')
+    parser.add_argument('-split', '--train_val_split', type=float, default=0.5, help='Ratio to divide training and validation sets.')
     parser.add_argument('-b', '--batch_size', type=int, default=32, help='Batch size for model training')
     parser.add_argument('-e', '--epochs', type=int, default=32, help='Number of epochs to train with')
 
@@ -151,8 +198,12 @@ if __name__ == "__main__":
                         default='./best_model.h5', help='Filename/path to save best model')
     parser.add_argument('-confusion', '--confusion_matrix', type=str,
                         default=None, help='Filename to store final confusion matrix')
+
+    ### OPTIMIZATIONS ARGS ###
     parser.add_argument('--disable_numba', dest='enable_numba', action='store_false',
                         help='Disable numba speed optimizations')
+    parser.add_argument('-cores', '--num_cores', type=int, default=0,
+                        help='Number of cores to use for multiprocessing. Defaults to single-core.')
 
     args = parser.parse_args()
 
@@ -163,6 +214,8 @@ if __name__ == "__main__":
     fchans = args.fchans
     tchans = args.tchans
     f_shift = args.f_shift
+    df, dt = args.bandwidth, args.sampling_time
+    min_freq, max_freq = args.min_freq, args.max_freq
 
     max_sampling_time = args.max_sampling_time
     training_set_name = args.save_training_set
@@ -174,21 +227,27 @@ if __name__ == "__main__":
 
     if prev_training_set: # override -p argument if loading in training set
         print(f"Loading in previously created training set: {prev_training_set}\n")
-        training_frames = np.load(prev_training_set, allow_pickle=True)
+        training_params = np.load(prev_training_set, allow_pickle=True)
+        means, stddevs, mins = training_params['means'], training_params['stddevs'], training_params['mins']
     else:
         if path_to_files is None:
             raise ValueError("-p (path_to_files) must be specified when creating training set from scratch")
 
         print("Creating training set from scratch...\n")
-        training_frames = generate_dataset.main(path_to_files, fchans, tchans, f_shift,
+        means, stddevs, mins = generate_dataset.main(path_to_files, fchans, tchans, f_shift,
                                             samples_per_file, total_samples, max_sampling_time)
 
         if training_set_name:
             # save final array to disk
             print("Saving training set to " + training_set_name)
-            np.save(training_set_name, training_frames)
+            np.savez(training_set_name, means=means, stddevs=stddevs, mins=mins)
 
-    ftdata, labels, slopes = make_labels(training_frames)
+    print(f'Number of frequency channels per sample: {fchans}')
+    print(f'Number of time bins per sample: {tchans}')
+    print('\n')
+
+    ftdata, labels, slopes = make_labels(total_samples, fchans, tchans, df, dt, min_freq, max_freq,
+                                            means, stddevs, mins, num_cores=args.num_cores)
 
     if args.enable_numba: # use numba-accelerated functions
         start_time = time()
@@ -206,9 +265,9 @@ if __name__ == "__main__":
     train_ftdata, val_ftdata, train_labels, val_labels, train_slopes, val_slopes = train_test_split(ftdata, labels, slopes, train_size=args.train_val_split)
     print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
 
-    ftdata = None; del ftdata # free memory by deleting potentially huge array
+    ftdata = labels = slopes = None # free memory by deleting potentially huge arrays
 
-    # disable file locking to save NN models
+    # disable file locking to save neural network models
     os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
     print("Constructing CNN with given input parameters...")
@@ -227,7 +286,7 @@ if __name__ == "__main__":
             train_slopes, val_slopes, saved_model_name=saved_model_name,
             weight_signal=args.weight_signal, batch_size=args.batch_size, epochs=args.epochs)
 
-    print(f"\nTraining and validating on {len(labels)} samples took {np.round((time() - start_time) / 60, 2)} minutes")
+    print(f"\nTraining and validating on {num_samples} samples took {(time() - start_time) / 60:.2f} minutes")
 
     # load the best model saved to generate confusion matrix
     print("Evaluating on validation set to generate confusion matrix...")
