@@ -1,11 +1,12 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import numba # speed up NumPy
-import multiprocessing as mp
-from tqdm import tqdm, trange
-from skimage import filters, morphology, measure, transform # classically detect line in image
 
+from tqdm import tqdm, trange
+
+from skimage import filters, morphology, measure, transform # classically detect line in image
 from sklearn.linear_model import LinearRegression
+from scipy.stats import theilslopes
 
 """
 Helper functions for training neural network, including
@@ -113,19 +114,6 @@ def get_classification_results(y_true, y_pred):
 
     return true_positives, false_positives, true_negatives, false_negatives
 
-@numba.njit(parallel=True)
-def get_classification_results_numba(y_true, y_pred):
-    """ Take true labels (y_true) and model-predicted
-    label (y_pred) for a binary classifier, and return
-    true_positives, false_positives, true_negatives, false_negatives
-    """
-    true_positives = np.where((y_true == 1) & (y_pred >= 0.5))[0]
-    false_positives = np.where((y_true == 0) & (y_pred >= 0.5))[0]
-    true_negatives = np.where((y_true == 0) & (y_pred < 0.5))[0]
-    false_negatives = np.where((y_true == 1) & (y_pred < 0.5))[0]
-
-    return true_positives, false_positives, true_negatives, false_negatives
-
 def print_metric(y_true, y_pred):
     """ Take true labels (y_true) and model-predicted
     label (y_pred) for a binary classifier
@@ -176,10 +164,7 @@ def plot_confusion_matrix(val_ftdata, val_labels, pred_probs, confusion_matrix_n
     accuracy, precision, recall, fscore, conf_mat = print_metric(val_labels, pred_labels)
     ftdata_shape = val_ftdata[0, :, :, 0].shape
 
-    if enable_numba:
-        TP, FP, TN, FN = get_classification_results_numba(val_labels, pred_labels)
-    else:
-        TP, FP, TN, FN = get_classification_results(val_labels, pred_labels)
+    TP, FP, TN, FN = get_classification_results(val_labels, pred_labels)
 
     # get lowest confidence selection for each category
     if TP.size:
@@ -234,7 +219,8 @@ def get_slope_from_driftRate(frame):
     return slope_pixels
 
 def get_driftRate_from_slope(slopes, df, dt):
-    """Converts array of slopes in pixel units to drift rates (Hz/s)."""
+    """Converts array of slopes in pixel units to drift rates (Hz/s).
+    Assumes that slope is run/rise since drift rate is run/rise."""
     drift_rate = slopes * (df/dt)
     return drift_rate
 
@@ -246,17 +232,17 @@ def hough_slope(ftdata):
     # use triangle thresholding to remove most noisy bits
     thresholded_data = ftdata >= filters.threshold_triangle(ftdata)
 
-    # remove small holes (salt and pepper noise)
-    thresholded_data = morphology.remove_small_objects(thresholded_data, min_size=3)
+    # remove small objects (salt and pepper noise)
+    small_objects_removed = morphology.remove_small_objects(thresholded_data, min_size=5)
 
     # segment image based on connected components, assuming longest component is desired signal
     # @source Vincent Agnus, https://stackoverflow.com/questions/47540926/get-the-largest-connected-component-of-segmentation-image
-    segmented_data = measure.label(thresholded_data, connectivity=2)
+    # segmented_data = measure.label(thresholded_data, connectivity=2)
 
-    if segmented_data.max() == 0: # if no connected components, fall back to using thresholded image
-        largestCC = thresholded_data
-    else:
-        largestCC = segmented_data == np.argmax(np.bincount(segmented_data.flat)[1:]) + 1
+    # if segmented_data.max() == 0: # if no connected components, fall back to using thresholded image
+    #     largestCC = thresholded_data
+    # else:
+    #     largestCC = segmented_data == np.argmax(np.bincount(segmented_data.flat)[1:]) + 1
 
     # find line and angle using Hough transform
     # tested_angles = np.linspace(-np.pi/2, np.pi/2, 360)
@@ -268,12 +254,14 @@ def hough_slope(ftdata):
     # # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
     # slope_pixels = np.tan(-angles[0]) if angles else 0
 
-    lin_reg = LinearRegression()
-    y, x = np.where(largestCC)
+    # lin_reg = LinearRegression()
+    x, y = np.where(small_objects_removed)
     try:
-        lin_reg.fit(x.reshape(-1, 1), y)
-        slope_pixels = lin_reg.coef_[0]
-    except:
-        slope_pixels = 0
+        # lin_reg.fit(x.reshape(-1, 1), y)
+        # slope_pixels = lin_reg.coef_[0]
 
-    return slope_pixels
+        slope_pixels, intercept, low_slope, high_slope = theilslopes(y, x, alpha=0.99)
+    except:
+        slope_pixels = low_slope = high_slope = 0
+
+    return slope_pixels, low_slope, high_slope
