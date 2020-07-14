@@ -4,7 +4,6 @@ from sklearn.model_selection import train_test_split
 import setigen as stg
 
 import tqdm
-from tqdm.contrib.concurrent import process_map # parallel processes with progress bar
 from time import time
 import os, argparse
 
@@ -28,8 +27,23 @@ narrowband signals with randomly generated signal properties.
 @source Bryan Brzycki (https://github.com/bbrzycki/setigen)
 """
 
-def simulate_signal(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5,
-                        SNRmin=10, SNRsigma=1, add_to_frame=True):
+def add_rfi(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5, min_width=10, max_width=40):
+    fchans = frame.fchans
+
+    # let true pulse begin in middle 50% of array and randomize drift rate
+    start_index = np.random.randint(0, fchans)
+    drift_rate = np.random.uniform(min_drift, max_drift)
+
+    random_SNR = np.random.uniform(SNRmin, SNRmax)
+    width = np.random.uniform(min_width, max_width)
+
+    frame.add_signal(stg.paths.choppy_rfi_path(frame.get_frequency(start_index), drift_rate, fchans, spread_type='uniform'),
+                 stg.constant_t_profile(level=frame.get_intensity(snr=random_SNR)),
+                 stg.gaussian_f_profile(width=width),
+                 stg.constant_bp_profile(level=1))
+
+def simulate_signal(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5,
+                    min_width=10, max_width=40, add_to_frame=True):
     """Generate dataset, taken from setigen docs (advanced topics)."""
     fchans = frame.fchans
 
@@ -38,7 +52,7 @@ def simulate_signal(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5
     drift_rate = np.random.uniform(min_drift, max_drift)
 
     # sample SNR and frequency profile randomly
-    random_SNR = SNRmin + np.random.lognormal(mean=1.0, sigma=SNRsigma)
+    random_SNR = np.random.uniform(SNRmin, SNRmax)
     width = np.random.uniform(min_width, max_width)
     f_profile_type = np.random.choice(['box', 'gaussian', 'lorentzian', 'voigt'])
 
@@ -60,12 +74,12 @@ def simulate_signal(frame, min_width=10, max_width=40, min_drift=-5, max_drift=5
                                             width=width,
                                             f_profile_type=f_profile_type)
 
-def parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq, means, stddevs, mins):
+def parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq, rfi_prob, means, stddevs, mins):
     """Takes arguments for frame and condenses it into one tuple
     to be passed into make_artificial_frame(). Used for multiprocessing,
     since parallel processes only take in one argument."""
 
-    frame_args = [fchans, tchans, df, dt, min_freq, max_freq]
+    frame_args = [fchans, tchans, df, dt, min_freq, max_freq, rfi_prob]
     distribution_args = [means, stddevs, mins]
 
     return (frame_args, distribution_args)
@@ -73,7 +87,7 @@ def parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq, means, stddevs,
 def make_artificial_frame(simulation_args):
     # unpack arguments
     frame_args, distribution_args = simulation_args
-    fchans, tchans, df, dt, min_freq, max_freq = frame_args
+    fchans, tchans, df, dt, min_freq, max_freq, rfi_prob = frame_args
     means, stddevs, mins = distribution_args
 
     # randomly sample frequency at end of array
@@ -83,9 +97,15 @@ def make_artificial_frame(simulation_args):
     frame = stg.Frame(fchans=fchans, tchans=tchans, df=df, dt=dt, fch1=fch1)
 
     # add chi-squared noise to frame using distribution args
-    noise = frame.add_noise_from_obs(means, stddevs, mins, noise_type='chi2')
+    frame.add_noise_from_obs(means, stddevs, mins, noise_type='chi2')
 
-    # add signal to frame and append to training_frames
+    # add RFI at random
+    if np.random.choice([True, False], p=[rfi_prob, 1-rfi_prob]):
+        add_rfi(frame)
+
+    noise = np.copy(frame.get_data())
+
+    # add signal to frame
     simulate_signal(frame, add_to_frame=True)
     signal = frame.get_data()
 
@@ -94,7 +114,8 @@ def make_artificial_frame(simulation_args):
 
     return noise, signal, slope
 
-def make_labels(num_samples, fchans, tchans, df, dt, min_freq, max_freq, means, stddevs, mins, num_cores=0):
+def make_labels(num_samples, fchans, tchans, df, dt, min_freq, max_freq,
+                    means, stddevs, mins, rfi_prob=0.15, num_cores=0):
     # pre-allocate arrays for ftdata and slopes
     ftdata = np.zeros([2 * num_samples, tchans, fchans])
     slopes = np.zeros(2 * num_samples)
@@ -104,7 +125,8 @@ def make_labels(num_samples, fchans, tchans, df, dt, min_freq, max_freq, means, 
     labels[1::2] = 1
 
     # compactify all arguments into one tuple for multiprocessing
-    simulation_args = parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq, means, stddevs, mins)
+    simulation_args = parse_frame_args(fchans, tchans, df, dt, min_freq, max_freq,
+                                        rfi_prob, means, stddevs, mins)
 
     # add pulses to frames only on odd-numbered samples
     print("Simulating pulses in training backgrounds")
@@ -117,8 +139,10 @@ def make_labels(num_samples, fchans, tchans, df, dt, min_freq, max_freq, means, 
             ftdata[2*sample_number + 1, :, :] = signal
             slopes[2*sample_number + 1] = slope # set slope of noise to 0
     else:
+        print(f"Running in parallel with {num_cores} cores")
+
         # duplicate simulation_args for parallel processes
-        simulation_args_iterable = simulation_args * num_samples
+        simulation_args_iterable = [simulation_args for i in np.arange(num_samples)]
         with mp.Pool(num_cores) as pool:
             result = pool.imap(make_artificial_frame, simulation_args_iterable)
             for sample_number in tqdm.trange(num_samples):
@@ -138,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--path_to_files', nargs='+', type=str,
                         help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
 
-    parser.add_argument('-total', '--total_samples', type=int, default=1000, help='Total number of samples to generate')
+    parser.add_argument('-samp', '--num_samples', type=int, default=1000, help='Total number of samples to generate')
     parser.add_argument('-spf', '--samples_per_file', type=int, default=50,
                         help='Number of training samples to extract from each filterbank file')
 
@@ -160,11 +184,11 @@ if __name__ == "__main__":
 
     ### SIGNAL PARAMETERS (SNR, width, drift rate, etc.) ###
     # parameters for signal-to-noise ratio of FRB
-    parser.add_argument('--SNRmin', type=float, default=10, help='Minimum SNR of signals.')
-    parser.add_argument('--SNRsigma', type=float, default=1, help='Sigma of log-normal distribution for SNRs.')
+    parser.add_argument('-snr', '--SNR_range', nargs=2, type=float, default=[10, 20], help='SNR range of signals, sampled from uniform distribution.')
     parser.add_argument('-drift', '--drift_rate', nargs=2, type=float, default=[-5, 5],
                             help='Min/max value for uniformly distributed drift rates (Hz/s)')
     parser.add_argument('--width', nargs=2, type=float, default=[10, 40], help='Min/max value for signal widths.')
+    parser.add_argument('--rfi_prob', type=float, default=0.15, help='Probability of injecting RFI into simulated array.')
 
     # save training set
     parser.add_argument('--save_training_set', type=str, default=None,
@@ -185,8 +209,7 @@ if __name__ == "__main__":
     parser.add_argument('-d2', '--n_dense2', type=int, default=128, help='Number of neurons in second dense layer')
 
     parser.add_argument('-w', '--weight_signal', type=float, default=1.0,
-                        help='Class weight of true signal, used to favor false positives (< 1) or false negatives (> 1)')
-
+                        help='Weight on true signal. Favor precision over recall if < 1 and vice-versa.')
     parser.add_argument('-split', '--train_val_split', type=float, default=0.5, help='Ratio to divide training and validation sets.')
     parser.add_argument('-b', '--batch_size', type=int, default=32, help='Batch size for model training')
     parser.add_argument('-e', '--epochs', type=int, default=32, help='Number of epochs to train with')
@@ -208,14 +231,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     path_to_files = args.path_to_files
-    total_samples = args.total_samples
+    num_samples = args.num_samples
     samples_per_file = args.samples_per_file
 
     fchans = args.fchans
     tchans = args.tchans
     f_shift = args.f_shift
-    df, dt = args.bandwidth, args.sampling_time
-    min_freq, max_freq = args.min_freq, args.max_freq
 
     max_sampling_time = args.max_sampling_time
     training_set_name = args.save_training_set
@@ -224,6 +245,8 @@ if __name__ == "__main__":
     prev_training_set = args.load_training
     saved_model_name = args.best_model_file
     previous_model = args.previous_model
+
+    script_start_time = time() # time how long script takes to run
 
     if prev_training_set: # override -p argument if loading in training set
         print(f"Loading in previously created training set: {prev_training_set}\n")
@@ -235,7 +258,7 @@ if __name__ == "__main__":
 
         print("Creating training set from scratch...\n")
         means, stddevs, mins = generate_dataset.main(path_to_files, fchans, tchans, f_shift,
-                                            samples_per_file, total_samples, max_sampling_time)
+                                            samples_per_file, num_samples, max_sampling_time)
 
         if training_set_name:
             # save final array to disk
@@ -246,8 +269,9 @@ if __name__ == "__main__":
     print(f'Number of time bins per sample: {tchans}')
     print('\n')
 
-    ftdata, labels, slopes = make_labels(total_samples, fchans, tchans, df, dt, min_freq, max_freq,
-                                            means, stddevs, mins, num_cores=args.num_cores)
+    ftdata, labels, slopes = make_labels(num_samples=num_samples, fchans=fchans, tchans=tchans, df=args.bandwidth, dt=args.sampling_time,
+                                            min_freq=args.min_freq, max_freq=args.max_freq, rfi_prob=args.rfi_prob,
+                                            means=means, stddevs=stddevs, mins=mins, num_cores=args.num_cores)
 
     if args.enable_numba: # use numba-accelerated functions
         start_time = time()
@@ -276,8 +300,6 @@ if __name__ == "__main__":
                                 saved_model_name=saved_model_name, previous_model=previous_model)
     print(model.summary())
 
-    start_time = time() # training time
-
     # add channel dimension for Keras tensors (1 channel)
     train_ftdata = train_ftdata[..., None]
     val_ftdata = val_ftdata[..., None]
@@ -291,7 +313,8 @@ if __name__ == "__main__":
     # load the best model saved to generate confusion matrix
     print("Evaluating on validation set to generate confusion matrix...")
     model = load_model(saved_model_name, compile=True)
-    pred_probs = model.predict(val_ftdata, verbose=1)[0][:, 0]
+    pred_probs = model.predict(val_ftdata, verbose=1)[0].flatten()
 
-    utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs,
-                                args.confusion_matrix, enable_numba=args.enable_numba)
+    utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs, args.confusion_matrix)
+
+    print(f"\nGenerating training set + training model + evaluating predictions: {(time() - script_start_time) / 60:.2f} minutes")
