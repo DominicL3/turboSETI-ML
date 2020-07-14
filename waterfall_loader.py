@@ -33,12 +33,11 @@ class ThreadedWaterfallLoader:
                     print("No more frequency pairs to load from freqs queue. Exiting thread.")
                     self.finished = True
 
-                wt_obs = Waterfall(self.candidate_file, f_start=f_start, f_stop=f_stop, max_load=self.max_memory)
+                wt_obs = Waterfall(self.candidate_file, f_start=f_start, f_stop=f_stop, max_load=self.max_memory/2)
                 freqs, data = wt_obs.grab_data(f_start, f_stop) # get candidate freqs and data
                 wt_obs = None # de-reference object to free up memory
                 # place data into the queue, ready to be processed
                 self.q.put((freqs, data))
-                # self.q.put(wt_obs)
 
     def get_observation(self):
         if self.finished: # no more freqs to process and no data left to unpack
