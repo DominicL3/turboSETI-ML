@@ -41,7 +41,7 @@ def prep_batch_for_prediction(data, enable_numba=True):
     data = data[..., None]
     return data
 
-def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rates_hough=None):
+def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rates_regression=None):
     """Save the frequencies and probabilities of predicted signals to CSV
     as well as the predicted drift rate of the signal. Assumes signal_freqs
     is a 2D array where each row is a frequency slice belonging to a predicted
@@ -52,17 +52,17 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rate
     min_freqs = np.min(signal_freqs, axis=1)
     max_freqs = np.max(signal_freqs, axis=1)
 
-    # fill data matrix
+    # fill DataFrame
     csv_data = np.zeros([len(signal_freqs), 4], dtype=signal_freqs.dtype)
     csv_data[:, 0] = min_freqs
     csv_data[:, 1] = max_freqs
     csv_data[:, 2] = signal_probs
     csv_data[:, 3] = drift_rates_ML
 
-    # add extra column for Hough transform drift rates if enabled
-    if drift_rates_hough is not None:
-        col_names.append("Hough Drift Rate (Hz/s)")
-        csv_data = np.hstack([csv_data, drift_rates_hough.reshape(-1, 1)])
+    # add extra column for regression transform drift rates if enabled
+    if drift_rates_regression is not None:
+        col_names.append("Regression Drift Rate (Hz/s)")
+        csv_data = np.hstack([csv_data, drift_rates_regression.reshape(-1, 1)])
 
     # convert data to pandas table
     csv_data = pd.DataFrame(csv_data, columns=col_names)
@@ -76,7 +76,7 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rate
     csv_data.to_csv(csv_name, sep='\t', index=False, float_format='%-10.5f')
 
 def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
-                    drift_rates_ML, drift_rates_hough=None):
+                    drift_rates_ML, drift_rates_regression=None):
     """Save predicted signals to PDF, along with their corresponding
     frequencies, prediction probabilities, and drift rates."""
 
@@ -102,10 +102,10 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
             prob = signal_probs[i]
             drift_ML = drift_rates_ML[i]
 
-            # what to title frequency spectrum based on whether Hough drift rates are passed in
-            if drift_rates_hough is not None:
-                drift_hough = drift_rates_hough[i]
-                spec_title = f'Drift rate (ML): {drift_ML:.4f} Hz/s, Drift rate (Hough): {drift_hough:.4f} Hz/s'
+            # what to title frequency spectrum based on whether regression drift rates are passed in
+            if drift_rates_regression is not None:
+                drift_regression = drift_rates_regression[i]
+                spec_title = f'Drift rate (ML): {drift_ML:.4f} Hz/s, Drift rate (regression): {drift_regression:.4f} Hz/s'
             else:
                 spec_title = f'Drift rate (ML): {drift_ML:.4f} Hz/s'
 
@@ -128,7 +128,7 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
                 plt.close(fig_narrowband)
 
 def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
-                    include_hough_drift=True, enable_numba=True, num_cores=0, save_pdf=None):
+                    include_regression_drift=True, enable_numba=True, num_cores=0, save_pdf=None):
     # load in fil/h5 file into memory
     start_time = time()
     freqs_test, ftdata_test = wt_loader.get_observation() # grab 2D data and frequencies
@@ -172,22 +172,24 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
     signal_probs = pred_test[voted_signal_probs]
     drift_rates_ML = utils.get_driftRate_from_slope(slopes_test[voted_signal_probs], df, dt)
 
-    if include_hough_drift:
-        print("\nComputing drift rate from Hough transform...")
+    if include_regression_drift:
+        start_time = time()
+        print("\nComputing drift rate from linear regression methods...")
 
         # use multiprocessing only if overhead is worth it (more signals than cores)
         if num_cores > 0 and num_signals_in_file >= num_cores:
             print(f"Running in parallel with {num_cores} cores")
-            hough_slopes = np.array(process_map(utils.hough_slope, predicted_signals, max_workers=num_cores,
+            regression_slopes = np.array(process_map(utils.regression_slope, predicted_signals, max_workers=num_cores,
                                                     chunksize=num_signals_in_file // num_cores))
         else:
-            hough_slopes = np.zeros(np.sum(voted_signal_probs))
+            regression_slopes = np.zeros(np.sum(voted_signal_probs))
             for i, data in enumerate(tqdm(predicted_signals)):
-                hough_slopes[i] = utils.hough_slope(data)
+                regression_slopes[i] = utils.regression_slope(data)
 
-        drift_rates_hough = utils.get_driftRate_from_slope(hough_slopes, df, dt)
+        drift_rates_regression = utils.get_driftRate_from_slope(regression_slopes, df, dt)
+        print(f"Finished estimating drift rates in {time() - start_time:.2f} seconds")
     else:
-        drift_rates_hough = None
+        drift_rates_regression = None
 
     print(f"\nStoring info on {num_signals_in_file} predicted candidates to {csv_name}")
 
@@ -195,7 +197,7 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
     if num_signals_in_file > 0:
         # save frequencies and prediction probabilities to csv
         save_to_csv(csv_name, signal_freqs, signal_probs,
-                        drift_rates_ML, drift_rates_hough)
+                        drift_rates_ML, drift_rates_regression)
 
         if save_pdf:
             # break pdf into parts if > 1 chunks are extracted
@@ -206,7 +208,7 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
 
             print(f"Saving images of {num_signals_in_file} signals to {pdf_name}")
             save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
-                            drift_rates_ML, drift_rates_hough)
+                            drift_rates_ML, drift_rates_regression)
 
     return num_signals_in_file
 
@@ -248,8 +250,8 @@ if __name__ == "__main__":
     parser.add_argument('--disable_numba', dest='enable_numba', action='store_false', help='Disable numba speed optimizations')
 
     # options to save outputs
-    parser.add_argument('--no_hough', dest='include_hough_drift', action='store_false',
-                        help='Do not compute drift rate from traditional Hough transforms.')
+    parser.add_argument('--no_regression', dest='include_regression_drift', action='store_false',
+                        help='Do not compute drift rate from traditional regression transforms.')
     parser.add_argument('-csv', '--csv_name', type=str, default='predictions.csv', help='Filename (csv) to save all predicted signals.')
     parser.add_argument('-pdf', '--save_pdf', type=str, default=None, help='Filename (pdf) to save all predicted signals.')
 
@@ -265,7 +267,6 @@ if __name__ == "__main__":
 
     nbytes_max = args.max_memory * 1e9 # load in at most this many bytes into memory at once
     nbytes_per_part = nbytes_max / 2 # have one array loaded in, another waiting on queue
-    memGB_per_part = args.max_memory / 2
 
     # load model and display summary
     model = load_model(model_name, compile=True)
@@ -288,11 +289,11 @@ if __name__ == "__main__":
 
     if len(freq_windows) > 1:
         print("\nThis file is too large to be loaded in all at once. "\
-            f"Loading file in {len(freq_windows)} parts, about {memGB_per_part} GB each")
+            f"Loading file in {len(freq_windows)} parts, about {args.max_memory / 2} GB each")
         print(f"Each part will contain approximately {freq_bins_per_load} frequency channnels to predict on")
         print(f"Frequency windows for each part (f_start, f_stop): {freq_windows}")
 
-    wt_loader = ThreadedWaterfallLoader(candidate_file, freq_windows, max_memory=memGB_per_part)
+    wt_loader = ThreadedWaterfallLoader(candidate_file, freq_windows, max_memory=args.max_memory)
     wt_loader.start()
 
     total_signals = 0 # running total of number of signals in entire file
@@ -306,7 +307,7 @@ if __name__ == "__main__":
         print(f"Loading data from f_start={f_start_max_filesize} MHz to f_stop={f_stop_max_filesize} MHz...")
 
         total_signals += find_signals(wt_loader, model, args.csv_name, bins_per_array=bins_per_array,
-                                        threshold=args.thresh, include_hough_drift=args.include_hough_drift,
+                                        threshold=args.thresh, include_regression_drift=args.include_regression_drift,
                                         enable_numba=args.enable_numba, num_cores=args.num_cores, save_pdf=args.save_pdf)
 
         gc.collect()
