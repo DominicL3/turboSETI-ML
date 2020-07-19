@@ -11,7 +11,7 @@ from tqdm.contrib.concurrent import process_map # multiprocessing pool with prog
 from time import time
 import os, argparse
 
-# modules to speed up performance
+# modules for performance increases
 import numba
 from waterfall_loader import ThreadedWaterfallLoader
 import gc # garbage collect every now and then
@@ -19,16 +19,15 @@ import gc # garbage collect every now and then
 from tensorflow.keras.models import load_model
 import utils
 
-
 # used for reading in h5 files
 os.environ['HDF5_USE_FILE_LOCKING'] = 'FALSE'
 
-def split_data(data, bins_per_array, enable_numba=True):
+def split_data(data, bins_per_array, f_shift, enable_numba=True):
     # split 2D data into smaller batches
     if enable_numba:
-        data = utils.split_numba(data, bins_per_array)
+        data = utils.split_numba(data, bins_per_array, f_shift)
     else:
-        data = utils.split(data, bins_per_array)
+        data = utils.split(data, bins_per_array, f_shift)
     return data
 
 def prep_batch_for_prediction(data, enable_numba=True):
@@ -47,25 +46,26 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rate
     is a 2D array where each row is a frequency slice belonging to a predicted
     signal, and that signal_probs is a 1D array."""
 
-    # compute min/max frequency window of every predicted signal
-    col_names = ["Min freq (MHz)", "Max freq (MHz)", "Probability", "ML Drift Rate (Hz/s)"]
-    min_freqs = np.min(signal_freqs, axis=1)
-    max_freqs = np.max(signal_freqs, axis=1)
-
-    # fill DataFrame
-    csv_data = np.zeros([len(signal_freqs), 4], dtype=signal_freqs.dtype)
-    csv_data[:, 0] = min_freqs
-    csv_data[:, 1] = max_freqs
-    csv_data[:, 2] = signal_probs
-    csv_data[:, 3] = drift_rates_ML
+    # create and fill DataFrame
+    csv_data = pd.DataFrame(dtype=signal_freqs.dtype)
+    csv_data["Min freq (MHz)"] = np.min(signal_freqs, axis=1) # frequency window of every predicted signal
+    csv_data["Max freq (MHz)"] = np.max(signal_freqs, axis=1)
+    csv_data["Probability"] = signal_probs
+    csv_data["ML Drift Rate (Hz/s)"] = drift_rates_ML
 
     # add extra column for regression transform drift rates if enabled
+    # should be array with columns (drift_pred, lower, upper) signifying
+    # the confidence intervals of the drift rate prediction
     if drift_rates_regression is not None:
-        col_names.append("Regression Drift Rate (Hz/s)")
-        csv_data = np.hstack([csv_data, drift_rates_regression.reshape(-1, 1)])
+        if drift_rates_regression.ndim == 1:
+            csv_data["Regression Drift Rate (Hz/s)"] = drift_rates_regression
+        elif drift_rates_regression.shape[1] == 3:
+            df_drift = pd.DataFrame(data=drift_rates_regression, columns=["Regression Drift Rate (Hz/s)",
+                                        "Lower Drift Rate (99%)", "Upper Drift Rate (99%)"])
+        else:
+            raise ValueError("drift_rates_regression needs to be array with either 1 or 3 columns.")
 
-    # convert data to pandas table
-    csv_data = pd.DataFrame(csv_data, columns=col_names)
+        csv_data = pd.concat([csv_data, df_drift], axis=1)
 
     # append predictions to file if it already exists
     if os.path.isfile(csv_name):
@@ -73,7 +73,7 @@ def save_to_csv(csv_name, signal_freqs, signal_probs, drift_rates_ML, drift_rate
         csv_data = loaded_data.append(csv_data, ignore_index=True)
 
     csv_data.sort_values("Min freq (MHz)", inplace=True) # sort lowest to highest frequency
-    csv_data.to_csv(csv_name, sep='\t', index=False, float_format='%-10.5f')
+    csv_data.to_csv(csv_name, sep='\t', index=False, float_format='%-10.6f')
 
 def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
                     drift_rates_ML, drift_rates_regression=None):
@@ -127,23 +127,22 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
                 pdf.savefig(fig_narrowband, dpi=80)
                 plt.close(fig_narrowband)
 
-def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
+def find_signals(wt_loader, model, csv_name, bins_per_array=1024, f_shift=None, threshold=0.5,
                     include_regression_drift=True, enable_numba=True, num_cores=0, save_pdf=None):
     # load in fil/h5 file into memory
     start_time = time()
     freqs_test, ftdata_test = wt_loader.get_observation() # grab 2D data and frequencies
     print(f"Loading data took {(time() - start_time)/60:.4f} min\n")
 
-
     # split 2D array into 3D array so each individual array has bins_per_array freq channels each
     print("Splitting array...")
     start_time = time()
-    ftdata_test = split_data(ftdata_test, bins_per_array, enable_numba)
+    ftdata_test = split_data(ftdata_test, bins_per_array, f_shift, enable_numba=enable_numba)
     print(f"Split runtime: {time() - start_time:.4f} seconds")
     print(f"Split array has shape {ftdata_test.shape}\n")
 
     # split up frequencies corresponding to data
-    freqs_test = split_data(freqs_test.reshape(1, -1), bins_per_array, enable_numba)
+    freqs_test = split_data(freqs_test.reshape(1, -1), bins_per_array, f_shift, enable_numba=enable_numba)
     freqs_test = freqs_test[:, 0] # remove extra dimension created to split_data
 
     # delete large variable and run garbage collection
@@ -180,14 +179,13 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, threshold=0.5,
         if num_cores > 0 and num_signals_in_file >= num_cores:
             print(f"Running in parallel with {num_cores} cores")
             regression_slopes = np.array(process_map(utils.regression_slope, predicted_signals, max_workers=num_cores,
-                                                    chunksize=num_signals_in_file // num_cores))
+                                                        chunksize=num_signals_in_file // num_cores))
         else:
-            regression_slopes = np.zeros(np.sum(voted_signal_probs))
-            for i, data in enumerate(tqdm(predicted_signals)):
-                regression_slopes[i] = utils.regression_slope(data)
+            regression_slopes = np.array([utils.regression_slope(data) for data in tqdm(predicted_signals)])
 
         drift_rates_regression = utils.get_driftRate_from_slope(regression_slopes, df, dt)
-        print(f"Finished estimating drift rates in {time() - start_time:.2f} seconds")
+        print(f"Finished estimating drift rates in {time() - start_time:.2f} seconds"\
+                f" | {num_signals_in_file/(time() - start_time):.2f}it/s")
     else:
         drift_rates_regression = None
 
@@ -241,7 +239,7 @@ if __name__ == "__main__":
     # Default value of None means all time channels are used.
     parser.add_argument('-f', '--fchans', type=int, default=1024,
                         help='Number of frequency channels to extract for each sample in candidate file.')
-    parser.add_argument('-fs', '--f_shift', type=float, default=None,
+    parser.add_argument('-fs', '--f_shift', type=int, default=None,
                         help='Number of frequency channels from start of current frame to begin successive frame. If None, default to no overlap, i.e. f_shift=fchans).')
 
     parser.add_argument('-p', '--thresh', type=float, default=0.5, help='Threshold probability to admit whether example is FRB or RFI.')
@@ -264,9 +262,10 @@ if __name__ == "__main__":
     candidate_file = args.candidate_file
     model_name = args.model_name # either single model or list of models to ensemble predict
     bins_per_array = args.fchans # number of frequency channels per split array
+    f_shift = bins_per_array if args.f_shift is None else args.f_shift # default to no overlapping arrays
 
     nbytes_max = args.max_memory * 1e9 # load in at most this many bytes into memory at once
-    nbytes_per_part = nbytes_max / 2 # have one array loaded in, another waiting on queue
+    nbytes_per_part = nbytes_max / 2 # half of memory for current array, other half for array waiting on queue
 
     # load model and display summary
     model = load_model(model_name, compile=True)
@@ -274,23 +273,26 @@ if __name__ == "__main__":
 
     # get fil/h5 file header
     obs = Waterfall(candidate_file, load_data=False)
-    df = abs(obs.header['foff']) * 1e6 # sampling frequency, converted from MHz to Hz
-    dt = abs(obs.header['tsamp']) # sampling time in seconds
+    # TODO: move df, dt, and t_end into ThreadedWaterfallLoader so as not to rely on global vars
+    df = obs.header['foff'] * 1e6 # sampling frequency, converted from MHz to Hz
+    dt = obs.header['tsamp'] # sampling time in seconds
     t_end = obs.header['tsamp'] * obs.n_ints_in_file # observation time in seconds
 
-    # range of spectrum
+    # range of entire spectrum
     f_start = obs.container.f_start
     f_stop = obs.container.f_stop
 
-    freq_bins_per_load = (f_stop - f_start) / (obs.container.file_size_bytes) * nbytes_per_part # originally nbytes_max
+    # compute how many times we need to split up filterbank file under memory restrictions
+    num_parts = np.ceil(obs.file_size_bytes / nbytes_per_part * (bins_per_array/f_shift))
+    freqs_per_load = (f_stop - f_start) / num_parts
 
-    freq_windows = [(f_start + i * freq_bins_per_load, f_start + (i+1) * freq_bins_per_load)
-                    for i in np.arange(np.ceil(obs.container.file_size_bytes / nbytes_per_part))] # originally nbytes_max
+    freq_windows = [(f_start + i * freqs_per_load, f_start + (i+1) * freqs_per_load)
+                            for i in np.arange(num_parts)]
 
     if len(freq_windows) > 1:
         print("\nThis file is too large to be loaded in all at once. "\
             f"Loading file in {len(freq_windows)} parts, about {args.max_memory / 2} GB each")
-        print(f"Each part will contain approximately {freq_bins_per_load} frequency channnels to predict on")
+        print(f"Each part will contain approximately {freqs_per_load} MHz to predict on")
         print(f"Frequency windows for each part (f_start, f_stop): {freq_windows}")
 
     wt_loader = ThreadedWaterfallLoader(candidate_file, freq_windows, max_memory=args.max_memory)
@@ -306,7 +308,7 @@ if __name__ == "__main__":
         f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part - 1]
         print(f"Loading data from f_start={f_start_max_filesize} MHz to f_stop={f_stop_max_filesize} MHz...")
 
-        total_signals += find_signals(wt_loader, model, args.csv_name, bins_per_array=bins_per_array,
+        total_signals += find_signals(wt_loader, model, args.csv_name, bins_per_array=bins_per_array, f_shift=f_shift,
                                         threshold=args.thresh, include_regression_drift=args.include_regression_drift,
                                         enable_numba=args.enable_numba, num_cores=args.num_cores, save_pdf=args.save_pdf)
 
