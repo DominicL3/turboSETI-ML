@@ -8,6 +8,8 @@ from skimage import filters, morphology, measure, transform # classically detect
 from sklearn.linear_model import LinearRegression
 from scipy.stats import theilslopes
 
+import warnings
+
 """
 Helper functions for training neural network, including
 data preprocessing and computing training results.
@@ -15,23 +17,30 @@ data preprocessing and computing training results.
 @source Liam Connor (https://github.com/liamconnor/single_pulse_ml)
 """
 
-def split(array, bins_per_array):
+def split(array, bins_per_array, bin_shift):
     """
     Splits long 2D array into 3D array of multiple 2D arrays,
-    such that each has bins_per_array time bins. Drops the
-    last chunk if it has fewer than bins_per_array bins.
+    such that each has bins_per_array time bins. If the last chunk
+    has fewer than bins_per_array bins, copy the last bins_per_array
+    columns from the end of the original array.
 
     Returns:
         split_array : numpy.ndarray
-            Array after splitting.
+            3D array with shape (num_samples, num_rows, bins_per_array).
     """
+    # compute total number of 2D arrays to pre-allocate
     total_bins = array.shape[1]
+    num_2d_arrays = int(np.ceil(total_bins / bin_shift))
 
-    split_array = np.zeros((int(np.ceil(total_bins/bins_per_array)), array.shape[0], bins_per_array),
-                            dtype=array.dtype)
+    split_array = np.zeros((num_2d_arrays, array.shape[0], bins_per_array), dtype=array.dtype)
 
     for i in trange(len(split_array)):
-        extracted_chunk = array[:, i * bins_per_array:(i+1) * bins_per_array]
+        # get next set of start and end bins
+        start_bin = i * bin_shift
+        end_bin = start_bin + bins_per_array
+
+        # extract array from original and fill new split array
+        extracted_chunk = array[:, start_bin:end_bin]
         split_array[i, :, :extracted_chunk.shape[1]] = extracted_chunk
 
     if total_bins % bins_per_array != 0: # fix when unevenly split
@@ -42,26 +51,33 @@ def split(array, bins_per_array):
     return split_array
 
 @numba.njit(parallel=True)
-def split_numba(array, bins_per_array):
+def split_numba(array, bins_per_array, bin_shift):
     """
     Does the same thing as split() but uses Numba for
     increased speed performance.
 
     Splits long 2D array into 3D array of multiple 2D arrays,
-    such that each has bins_per_array time bins. Drops the last chunk if it
-    has fewer than bins_per_array bins.
+    such that each has bins_per_array time bins. If the last chunk
+    has fewer than bins_per_array bins, copy the last bins_per_array
+    columns from the end of the original array.
 
     Returns:
         split_array : numpy.ndarray
-            3D array after splitting.
+            3D array with shape (num_samples, num_rows, bins_per_array).
     """
+    # compute total number of 2D arrays to pre-allocate
     total_bins = array.shape[1]
+    num_2d_arrays = int(np.ceil(total_bins / bin_shift))
 
-    split_array = np.zeros((int(np.ceil(total_bins/bins_per_array)), array.shape[0], bins_per_array),
-                            dtype=array.dtype)
+    split_array = np.zeros((num_2d_arrays, array.shape[0], bins_per_array), dtype=array.dtype)
 
-    for i in numba.prange(len(split_array)):
-        extracted_chunk = array[:, i * bins_per_array:(i+1) * bins_per_array]
+    for i in numba.prange(len(split_array)): # run in parallel for increased speed
+        # get next set of start and end bins
+        start_bin = i * bin_shift
+        end_bin = start_bin + bins_per_array
+
+        # extract array from original and fill new split array
+        extracted_chunk = array[:, start_bin:end_bin]
         split_array[i, :, :extracted_chunk.shape[1]] = extracted_chunk
 
     if total_bins % bins_per_array != 0: # fix when unevenly split
@@ -224,10 +240,13 @@ def get_driftRate_from_slope(slopes, df, dt):
     drift_rate = slopes * (df/dt)
     return drift_rate
 
-def hough_slope(ftdata):
+def regression_slope(ftdata):
     """Detect line in image using triangle threshold and Hough transform.
     Convert angle to slope in pixel units, to be later converted to drift
     rate with knowledge of the sampling time/sampling frequency."""
+
+    warnings.filterwarnings('ignore', message='Mean of empty slice.')
+    warnings.filterwarnings('ignore', message='invalid value encountered in double_scalars')
 
     # use triangle thresholding to remove most noisy bits
     thresholded_data = ftdata >= filters.threshold_triangle(ftdata)
@@ -254,14 +273,10 @@ def hough_slope(ftdata):
     # # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
     # slope_pixels = np.tan(-angles[0]) if angles else 0
 
-    # lin_reg = LinearRegression()
-    x, y = np.where(small_objects_removed)
+    x, y = np.where(ftdata)
     try:
-        # lin_reg.fit(x.reshape(-1, 1), y)
-        # slope_pixels = lin_reg.coef_[0]
-
         slope_pixels, intercept, low_slope, high_slope = theilslopes(y, x, alpha=0.99)
     except:
         slope_pixels = low_slope = high_slope = 0
 
-    return slope_pixels, low_slope, high_slope
+    return np.array([slope_pixels, low_slope, high_slope])
