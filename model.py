@@ -138,7 +138,7 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
 
 def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
                 train_slopes, val_slopes, saved_model_name='best_model.h5',
-                weight_signal=1.0, classification_loss_weight=1000, batch_size=32, epochs=32):
+                weight_signal=1.0, classification_loss_weight=1e5, batch_size=32, epochs=32):
     """
     Fit a model using the given training data and labels while validating each epoch.
     Save the model only when it performs better than the current val_loss. Weights can
