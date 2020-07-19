@@ -27,7 +27,7 @@ narrowband signals with randomly generated signal properties.
 @source Bryan Brzycki (https://github.com/bbrzycki/setigen)
 """
 
-def add_rfi(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5, min_width=10, max_width=40):
+def add_rfi(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5, min_width=5, max_width=30):
     fchans = frame.fchans
 
     # let true pulse begin in middle 50% of array and randomize drift rate
@@ -37,13 +37,13 @@ def add_rfi(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5, min_width=10
     random_SNR = np.random.uniform(SNRmin, SNRmax)
     width = np.random.uniform(min_width, max_width)
 
-    frame.add_signal(stg.paths.choppy_rfi_path(frame.get_frequency(start_index), drift_rate, fchans, spread_type='uniform'),
+    frame.add_signal(stg.paths.choppy_rfi_path(frame.get_frequency(start_index), drift_rate, fchans, spread_type='normal'),
                  stg.constant_t_profile(level=frame.get_intensity(snr=random_SNR)),
                  stg.gaussian_f_profile(width=width),
                  stg.constant_bp_profile(level=1))
 
 def simulate_signal(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5,
-                    min_width=10, max_width=40, add_to_frame=True):
+                    min_width=5, max_width=30, add_to_frame=True):
     """Generate dataset, taken from setigen docs (advanced topics)."""
     fchans = frame.fchans
 
@@ -129,7 +129,7 @@ def make_labels(num_samples, fchans, tchans, df, dt, min_freq, max_freq,
                                         rfi_prob, means, stddevs, mins)
 
     # add pulses to frames only on odd-numbered samples
-    print("Simulating pulses in training backgrounds")
+    print("Simulating signals in training backgrounds...")
 
     # create artificial frames and save them into training data
     if num_cores == 0: # make training data serially (single-core)
@@ -273,21 +273,20 @@ if __name__ == "__main__":
                                             min_freq=args.min_freq, max_freq=args.max_freq, rfi_prob=args.rfi_prob,
                                             means=means, stddevs=stddevs, mins=mins, num_cores=args.num_cores)
 
+    start_time = time()
+    print('\nScaling arrays...')
     if args.enable_numba: # use numba-accelerated functions
-        start_time = time()
-        print('Scaling arrays...')
         utils.scale_data_numba(ftdata)
-        print(f"Done scaling in {np.round((time() - start_time), 2)} seconds!\n")
     else:
-        print('Scaling arrays...')
         utils.scale_data(ftdata)
-        print(f"Done scaling in {np.round((time() - start_time), 2)} seconds!\n")
+    print(f"Done scaling in {time() - start_time: .2f} seconds!\n")
+
 
     # split data into training and validation sets
     start_time = time()
     print('Splitting data into training and validation sets...')
     train_ftdata, val_ftdata, train_labels, val_labels, train_slopes, val_slopes = train_test_split(ftdata, labels, slopes, train_size=args.train_val_split)
-    print(f"Split data in {np.round((time() - start_time), 2)} seconds!\n")
+    print(f"Split data in {time() - start_time: .2f} seconds!\n")
 
     ftdata = labels = slopes = None # free memory by deleting potentially huge arrays
 
