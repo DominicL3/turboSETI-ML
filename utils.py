@@ -248,33 +248,33 @@ def regression_slope(ftdata):
     warnings.filterwarnings('ignore', message='Mean of empty slice.')
     warnings.filterwarnings('ignore', message='invalid value encountered in double_scalars')
 
-    # use triangle thresholding to remove most noisy bits
-    thresholded_data = ftdata >= filters.threshold_triangle(ftdata)
-
-    # remove small objects (salt and pepper noise)
-    small_objects_removed = morphology.remove_small_objects(thresholded_data, min_size=5)
-
-    # segment image based on connected components, assuming longest component is desired signal
-    # @source Vincent Agnus, https://stackoverflow.com/questions/47540926/get-the-largest-connected-component-of-segmentation-image
-    # segmented_data = measure.label(thresholded_data, connectivity=2)
-
-    # if segmented_data.max() == 0: # if no connected components, fall back to using thresholded image
-    #     largestCC = thresholded_data
-    # else:
-    #     largestCC = segmented_data == np.argmax(np.bincount(segmented_data.flat)[1:]) + 1
-
-    # find line and angle using Hough transform
-    # tested_angles = np.linspace(-np.pi/2, np.pi/2, 360)
-    # h, theta, d = transform.hough_line(largestCC, theta=tested_angles)
-
-    # # pick best line using peak in Hough transform; might have no peaks and be set to None
-    # angles = transform.hough_line_peaks(h, theta, d, num_peaks=1, min_distance=10)[1]
-
-    # # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
-    # slope_pixels = np.tan(-angles[0]) if angles else 0
-
-    x, y = np.where(ftdata)
     try:
+        # use triangle thresholding to remove most noisy bits
+        thresholded_data = ftdata >= filters.threshold_triangle(ftdata)
+
+        # remove small objects (salt and pepper noise)
+        small_objects_removed = morphology.remove_small_objects(thresholded_data, min_size=5)
+
+        # segment image based on connected components, assuming longest component is desired signal
+        # @source Vincent Agnus, https://stackoverflow.com/questions/47540926/get-the-largest-connected-component-of-segmentation-image
+        # segmented_data = measure.label(thresholded_data, connectivity=2)
+
+        # if segmented_data.max() == 0: # if no connected components, fall back to using thresholded image
+        #     largestCC = thresholded_data
+        # else:
+        #     largestCC = segmented_data == np.argmax(np.bincount(segmented_data.flat)[1:]) + 1
+
+        # find line and angle using Hough transform
+        # tested_angles = np.linspace(-np.pi/2, np.pi/2, 360)
+        # h, theta, d = transform.hough_line(largestCC, theta=tested_angles)
+
+        # # pick best line using peak in Hough transform; might have no peaks and be set to None
+        # angles = transform.hough_line_peaks(h, theta, d, num_peaks=1, min_distance=10)[1]
+
+        # # convert from angle to slope (negative because drift rate is run/rise when time is y-axis)
+        # slope_pixels = np.tan(-angles[0]) if angles else 0
+
+        x, y = np.where(small_objects_removed)
         slope_pixels, intercept, low_slope, high_slope = theilslopes(y, x, alpha=0.99)
     except:
         slope_pixels = low_slope = high_slope = 0
