@@ -7,14 +7,14 @@ from matplotlib.backends.backend_pdf import PdfPages
 from blimpy import Waterfall
 
 from tqdm import tqdm, trange
-from tqdm.contrib.concurrent import process_map # multiprocessing pool with progress bar
 from time import time
-import os, argparse
+import os, sys, argparse
 
 # modules for performance increases
 import numba
 from waterfall_loader import ThreadedWaterfallLoader
 import gc # garbage collect every now and then
+import multiprocessing as mp
 
 from tensorflow.keras.models import load_model
 import utils
@@ -127,8 +127,7 @@ def save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
                 pdf.savefig(fig_narrowband, dpi=80)
                 plt.close(fig_narrowband)
 
-def find_signals(wt_loader, model, csv_name, bins_per_array=1024, f_shift=None, threshold=0.5,
-                    include_regression_drift=True, enable_numba=True, num_cores=0, save_pdf=None):
+def find_signals(wt_loader, model, bins_per_array=1024, f_shift=None, threshold=0.5, enable_numba=True):
     # load in fil/h5 file into memory
     start_time = time()
     freqs_test, ftdata_test = wt_loader.get_observation() # grab 2D data and frequencies
@@ -167,48 +166,32 @@ def find_signals(wt_loader, model, csv_name, bins_per_array=1024, f_shift=None, 
 
     # get paths to predicted signals and their probabilities
     predicted_signals = ftdata_test[voted_signal_probs, :, :, 0]
-    signal_freqs = freqs_test[voted_signal_probs]
-    signal_probs = pred_test[voted_signal_probs]
+    signal_freqs = freqs_test[voted_signal_probs] # freqs for predicted signals
+    signal_probs = pred_test[voted_signal_probs] # probabilities of predictions for signals
     drift_rates_ML = utils.get_driftRate_from_slope(slopes_test[voted_signal_probs], df, dt)
 
-    if include_regression_drift:
-        start_time = time()
-        print("\nComputing drift rate from linear regression methods...")
+    return predicted_signals, signal_freqs, signal_probs, drift_rates_ML
 
-        # use multiprocessing only if overhead is worth it (more signals than cores)
-        if num_cores > 0 and num_signals_in_file >= num_cores:
-            print(f"Running in parallel with {num_cores} cores")
-            regression_slopes = np.array(process_map(utils.regression_slope, predicted_signals, max_workers=num_cores,
-                                                        chunksize=num_signals_in_file // num_cores))
-        else:
-            regression_slopes = np.array([utils.regression_slope(data) for data in tqdm(predicted_signals)])
-
-        drift_rates_regression = utils.get_driftRate_from_slope(regression_slopes, df, dt)
-        print(f"Finished estimating drift rates in {time() - start_time:.2f} seconds"\
-                f" | {num_signals_in_file/(time() - start_time):.2f}it/s")
+def compute_slopes_regression(predicted_signals, num_cores=0):
+    # use multiprocessing only if overhead is worth it (more signals than cores)
+    if num_cores > 0:
+        print(f"Running in parallel with {num_cores} cores")
+        # put predicted signals into shared memory for multiprocessing
+        # shared = mp.RawArray('d', predicted_signals.size)
+        # shared_preds = np.frombuffer(shared).reshape(predicted_signals.shape)
+        # np.copyto(shared_preds, predicted_signals)
+        with mp.Pool(num_cores) as pool:
+            try:
+                regression_slopes = np.array([slope for slope in tqdm(pool.imap(utils.regression_slope, predicted_signals), total=len(predicted_signals))])
+            except KeyboardInterrupt:
+                print("Parent received KeyboardInterrupt, exiting...")
+                pool.terminate()
+                pool.join()
+                sys.exit()
     else:
-        drift_rates_regression = None
+        regression_slopes = np.array([utils.regression_slope(data) for data in tqdm(predicted_signals)])
 
-    print(f"\nStoring info on {num_signals_in_file} predicted candidates to {csv_name}")
-
-    # save data to csv and/or pdf only if at least one signal was found
-    if num_signals_in_file > 0:
-        # save frequencies and prediction probabilities to csv
-        save_to_csv(csv_name, signal_freqs, signal_probs,
-                        drift_rates_ML, drift_rates_regression)
-
-        if save_pdf:
-            # break pdf into parts if > 1 chunks are extracted
-            if wt_loader.q_freqs.empty(): # put all in one PDF if no more chunks to extract
-                pdf_name = save_pdf
-            else:
-                pdf_name = f"{save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
-
-            print(f"Saving images of {num_signals_in_file} signals to {pdf_name}")
-            save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
-                            drift_rates_ML, drift_rates_regression)
-
-    return num_signals_in_file
+    return regression_slopes
 
 if __name__ == "__main__":
     """
@@ -295,24 +278,59 @@ if __name__ == "__main__":
         print(f"Each part will contain approximately {freqs_per_load} MHz to predict on")
         print(f"Frequency windows for each part (f_start, f_stop): {freq_windows}")
 
+    # begin loading in data
     wt_loader = ThreadedWaterfallLoader(candidate_file, freq_windows, max_memory=args.max_memory)
     wt_loader.start()
 
     total_signals = 0 # running total of number of signals in entire file
-    if os.path.isfile(args.csv_name): # delete old file
+    if os.path.isfile(args.csv_name): # delete old file if it exists
             os.remove(args.csv_name)
 
+    # iterate through all parts of the fil/h5 file
     for test_part in np.arange(1, len(freq_windows) + 1):
         part_start_time = time()
         print(f"\nANALYZING PART {test_part} / {len(freq_windows)}:")
         f_start_max_filesize, f_stop_max_filesize = freq_windows[test_part - 1]
         print(f"Loading data from f_start={f_start_max_filesize} MHz to f_stop={f_stop_max_filesize} MHz...")
 
-        total_signals += find_signals(wt_loader, model, args.csv_name, bins_per_array=bins_per_array, f_shift=f_shift,
-                                        threshold=args.thresh, include_regression_drift=args.include_regression_drift,
-                                        enable_numba=args.enable_numba, num_cores=args.num_cores, save_pdf=args.save_pdf)
-
+        predicted_signals, signal_freqs, signal_probs, drift_rates_ML = find_signals(wt_loader, model, bins_per_array=bins_per_array, f_shift=f_shift,
+                                                                                        threshold=args.thresh, enable_numba=args.enable_numba)
         gc.collect()
+
+        num_signals_in_file = len(predicted_signals)
+        total_signals += num_signals_in_file
+
+        if args.include_regression_drift:
+            start_time = time()
+            print("\nComputing drift rate from linear regression methods...")
+
+            # compute drift rate for all predicted signals from regression methods
+            regression_slopes = compute_slopes_regression(predicted_signals, num_cores=args.num_cores)
+            drift_rates_regression = utils.get_driftRate_from_slope(regression_slopes, df, dt)
+
+            print(f"Finished estimating drift rates in {time() - start_time:.2f} seconds"\
+                    f" | {num_signals_in_file/(time() - start_time):.2f}it/s")
+        else:
+            drift_rates_regression = None
+
+        print(f"\nStoring info on {num_signals_in_file} predicted candidates to {args.csv_name}")
+
+        # save data to csv and/or pdf only if at least one signal was found
+        if num_signals_in_file > 0:
+            # save frequencies and prediction probabilities to csv
+            save_to_csv(args.csv_name, signal_freqs, signal_probs,
+                            drift_rates_ML, drift_rates_regression)
+
+            if args.save_pdf:
+                # break pdf into parts if > 1 chunks are extracted
+                if wt_loader.q_freqs.empty(): # put all in one PDF if no more chunks to extract
+                    pdf_name = args.save_pdf
+                else:
+                    pdf_name = f"{args.save_pdf.rsplit('.', 1)[0]}_PART{test_part:04d}.pdf"
+
+                print(f"Saving images of {num_signals_in_file} signals to {pdf_name}")
+                save_to_pdf(pdf_name, t_end, predicted_signals, signal_freqs, signal_probs,
+                                drift_rates_ML, drift_rates_regression)
 
         print(f"\nTotal signals found: {total_signals}")
         print(f"Analyzing part {test_part} took {(time() - part_start_time)/60:.2f} minutes")
