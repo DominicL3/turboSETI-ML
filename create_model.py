@@ -47,8 +47,8 @@ def simulate_signal(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5,
     """Generate dataset, taken from setigen docs (advanced topics)."""
     fchans = frame.fchans
 
-    # let true pulse begin in middle 50% of array and randomize drift rate
-    start_index = np.random.randint(0.25 * fchans, 0.75 * fchans)
+    # let true signal begin in middle ~75% of array and randomize drift rate
+    start_index = np.random.randint(0.15 * fchans, 0.85 * fchans)
     drift_rate = np.random.uniform(min_drift, max_drift)
 
     # sample SNR and frequency profile randomly

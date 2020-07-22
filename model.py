@@ -1,13 +1,12 @@
+import numpy as np
+
 # neural net imports
-import tensorflow
-tensorflow.compat.v1.disable_eager_execution()
-
 from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Input, Activation, Dense, Dropout
-from tensorflow.keras.layers import Conv2D, BatchNormalization
-from tensorflow.keras.layers import MaxPooling2D, GlobalMaxPooling2D
 
-from sklearn.metrics import precision_recall_fscore_support
+from tensorflow.keras.layers import Input, Activation, Dense, Dropout, concatenate
+from tensorflow.keras.layers import Conv2D, BatchNormalization, MaxPooling2D, GlobalMaxPooling2D
+
+from tensorflow.keras.losses import binary_crossentropy, mean_squared_error
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 
 def build_CNN(input_layer, num_conv_layers=2, num_filters=32):
@@ -74,10 +73,10 @@ def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
     # run through two fully connected layers
     # add Dropout for regularization (mitigate overfitting)
     fc_layers = Dense(n_dense1, activation='relu')(cnn_2d)
-    fc_layers = Dropout(0.25)(fc_layers)
+    fc_layers = Dropout(0.2)(fc_layers)
 
     fc_layers = Dense(n_dense2, activation='relu')(fc_layers)
-    fc_layers = Dropout(0.25)(fc_layers)
+    fc_layers = Dropout(0.2)(fc_layers)
 
     return fc_layers
 
@@ -132,9 +131,35 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
         slope_branch = build_FC(cnn_2d, [input_layer, class_branch], n_dense1*2, n_dense2*2)
         slope_branch = Dense(1, activation='linear', name='slope')(slope_branch)
 
-        model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
+        # model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
+
+        # NOTE: this is new, remove if it doesn't work!
+        merged_output = concatenate([class_branch, slope_branch])
+        model = Model(inputs=input_layer, outputs=merged_output, name=saved_model_name)
 
     return model
+
+def classification_regression_loss(y_true, y_pred):
+    """
+    Loss function defined for classification and regression outputs, created
+    by multiplying the classification loss by regression loss. Assumes classification
+    result comes from the first column, and regression prediction is in the second column.
+    Uses binary cross-entropy for classification and mean-squared-error for regression.
+
+    Parameters:
+    ----------
+    y_true : tf.Tensor
+        Tensor of true labels.
+    y_pred : tf.Tensor
+        Tensor of predicted labels.
+
+    Returns
+    -------
+    loss : float
+        Overall loss function, product of individual losses.
+    """
+    loss = binary_crossentropy(y_true[:, 0], y_pred[:, 0]) * mean_squared_error(y_true[:, 1], y_pred[:, 1])
+    return loss
 
 def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
                 train_slopes, val_slopes, saved_model_name='best_model.h5',
@@ -168,17 +193,18 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
         Batch size for training network.
     epochs : int, optional
         Number of maximum epochs to train for. Model will stop at an earlier epoch
-        if val_loss does not improve after 15 epochs.
+        if val_loss does not improve after 20 epochs.
     """
 
     # define loss for classification and regression and weight each loss
     # classification is more important, so its weight should be > 1
-    loss_dict = {'class': 'binary_crossentropy', 'slope': 'mean_squared_error'}
+    loss_dict = {'class': 'binary_crossentropy', 'slope': 'mean_absolute_percentage_error'}
     loss_weights_dict = {'class': classification_loss_weight, 'slope': 1}
 
     # compile model and optimize using Adam
-    model.compile(loss=loss_dict, loss_weights=loss_weights_dict,
-                    optimizer='adam', metrics=['accuracy'])
+    # model.compile(loss=loss_dict, loss_weights=loss_weights_dict, optimizer='adam', metrics={'class': 'accuracy', 'slope': 'mse'})
+
+    model.compile(loss=classification_regression_loss, optimizer='adam')
 
     # save model with lowest validation loss
     loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)
@@ -186,10 +212,15 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
     # cut learning rate in half if validation loss doesn't improve in 5 epochs
     reduce_lr_callback = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
 
-    # stop training if validation loss doesn't improve after 15 epochs
-    early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
+    # stop training if validation loss doesn't improve after 20 epochs
+    early_stop_callback = EarlyStopping(monitor='val_loss', patience=20, verbose=1)
 
-    model.fit(x=train_ftdata, y={'class': train_labels, 'slope': train_slopes},
-            validation_data=(val_ftdata, {'class': val_labels, 'slope': val_slopes}),
-            class_weight={'class': {0: 1, 1: weight_signal}}, batch_size=batch_size, epochs=epochs,
+    # model.fit(x=train_ftdata, y={'class': train_labels, 'slope': train_slopes},
+    #         validation_data=(val_ftdata, {'class': val_labels, 'slope': val_slopes}),
+    #         class_weight={'class': {0: 1, 1: weight_signal}}, batch_size=batch_size, epochs=epochs,
+    #         callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
+
+    model.fit(x=train_ftdata, y=np.vstack([train_labels, train_slopes]).T,
+            validation_data=(val_ftdata, np.vstack([val_labels, val_slopes]).T),
+            batch_size=batch_size, epochs=epochs,
             callbacks=[loss_callback, reduce_lr_callback, early_stop_callback])
