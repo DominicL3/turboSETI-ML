@@ -37,7 +37,7 @@ def build_CNN(input_layer, num_conv_layers=2, num_filters=32):
         cnn_2d = Conv2D(num_filters, (3, 3), padding='same')(cnn_2d)
         cnn_2d = BatchNormalization()(cnn_2d)
         cnn_2d = Activation('relu')(cnn_2d)
-        cnn_2d = MaxPooling2D(pool_size=(2, 2))(cnn_2d)
+        # cnn_2d = MaxPooling2D(pool_size=(2, 2))(cnn_2d) NOTE: maxpooling removed!
 
     # max pool all feature maps
     cnn_2d = GlobalMaxPooling2D()(cnn_2d)
