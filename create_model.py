@@ -47,8 +47,8 @@ def simulate_signal(frame, SNRmin=10, SNRmax=20, min_drift=-5, max_drift=5,
     """Generate dataset, taken from setigen docs (advanced topics)."""
     fchans = frame.fchans
 
-    # let true signal begin in middle ~75% of array and randomize drift rate
-    start_index = np.random.randint(0.15 * fchans, 0.85 * fchans)
+    # let true pulse begin in middle 50% of array and randomize drift rate
+    start_index = np.random.randint(0.25 * fchans, 0.75 * fchans)
     drift_rate = np.random.uniform(min_drift, max_drift)
 
     # sample SNR and frequency profile randomly
@@ -312,8 +312,8 @@ if __name__ == "__main__":
     # load the best model saved to generate confusion matrix
     print("Evaluating on validation set to generate confusion matrix...")
     model = load_model(saved_model_name, compile=False)
-    pred_probs = model.predict(val_ftdata, verbose=1)[:, 0]
+    pred_probs = model.predict(val_ftdata, verbose=1)[0].flatten()
 
     utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs, args.confusion_matrix)
 
-    print(f"\nGenerating training set + training model + evaluating predictions: {(time() - script_start_time) / 60:.2f} minutes")
+    print(f"\nGenerating training set + training model + evaluating predictions: {(time() - script_start_time) / 60:.2f} minutes")j
