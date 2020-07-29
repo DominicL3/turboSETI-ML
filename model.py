@@ -25,7 +25,7 @@ def build_CNN(input_layer, num_conv_layers=2, num_filters=32):
     cnn_2d = Conv2D(num_filters, (3, 3), padding='same', input_shape=(None, None, 1))(input_layer)
     cnn_2d = BatchNormalization()(cnn_2d) # standardize all inputs to activation function
     cnn_2d = Activation('relu')(cnn_2d)
-    # cnn_2d = MaxPooling2D(pool_size=(2, 2))(cnn_2d) # max pool to reduce dimensionality by half
+    cnn_2d = MaxPooling2D(pool_size=(2, 2))(cnn_2d) # max pool to reduce dimensionality by half
 
     # repeat and double the filter size for each convolutional block to make this DEEP
     for layer_number in range(2, num_conv_layers + 1):
