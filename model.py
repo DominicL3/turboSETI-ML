@@ -1,13 +1,8 @@
 # neural net imports
-import tensorflow
-tensorflow.compat.v1.disable_eager_execution()
-
 from tensorflow.keras.models import Model, load_model
-from tensorflow.keras.layers import Input, Activation, Dense, Dropout
-from tensorflow.keras.layers import Conv2D, BatchNormalization
-from tensorflow.keras.layers import MaxPooling2D, GlobalMaxPooling2D
+from tensorflow.keras.layers import Input, Activation, Dense, Dropout, add
+from tensorflow.keras.layers import Conv2D, BatchNormalization, MaxPooling2D, GlobalMaxPooling2D
 
-from sklearn.metrics import precision_recall_fscore_support
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau, EarlyStopping
 
 def build_CNN(input_layer, num_conv_layers=2, num_filters=32):
@@ -45,7 +40,7 @@ def build_CNN(input_layer, num_conv_layers=2, num_filters=32):
 
     return cnn_2d
 
-def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
+def build_FC(cnn_2d, n_dense1=256, n_dense2=128):
     """
     Build the fully-connected layers. One branch of FC layers uses the
     feature maps to predict the class of the input, the other branch of FC layers
@@ -56,9 +51,7 @@ def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
     ----------
     cnn_2d : Keras tensor
         Input Keras CNN tensor (output of CNN layers). Feature maps are used
-        as inputs to the fully-connected layers.
-    inputs : list
-        List of Keras inputs to feed to fully-connected layers.
+        as inputs to the fully-connected layers.s
     n_dense1 : int
         Number of neurons in first hidden layer.
     n_dense2 : int
@@ -74,10 +67,10 @@ def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
     # run through two fully connected layers
     # add Dropout for regularization (mitigate overfitting)
     fc_layers = Dense(n_dense1, activation='relu')(cnn_2d)
-    fc_layers = Dropout(0.25)(fc_layers)
+    fc_layers = Dropout(0.2)(fc_layers)
 
     fc_layers = Dense(n_dense2, activation='relu')(fc_layers)
-    fc_layers = Dropout(0.25)(fc_layers)
+    fc_layers = Dropout(0.2)(fc_layers)
 
     return fc_layers
 
@@ -123,13 +116,13 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
         cnn_2d = build_CNN(input_layer, num_conv_layers, num_filters)
 
         # predict what the class label should be
-        class_branch = build_FC(cnn_2d, input_layer, n_dense1, n_dense2)
+        class_branch = build_FC(cnn_2d, n_dense1, n_dense2)
         class_branch = Dense(1, activation='sigmoid', name='class')(class_branch)
 
         # predict SLOPE with input image AND predicted class (drift rate calculated later)
         # network doesn't have access to channel bandwidth and sampling time
         # double the number of hidden neurons since drift rate is harder to predict than class
-        slope_branch = build_FC(cnn_2d, [input_layer, class_branch], n_dense1*2, n_dense2*2)
+        slope_branch = build_FC(cnn_2d, n_dense1*2, n_dense2*2)
         slope_branch = Dense(1, activation='linear', name='slope')(slope_branch)
 
         model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
@@ -138,7 +131,7 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
 
 def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
                 train_slopes, val_slopes, saved_model_name='best_model.h5',
-                weight_signal=1.0, classification_loss_weight=1e5, batch_size=32, epochs=32):
+                weight_signal=1.0, classification_loss_weight=1000, batch_size=32, epochs=32):
     """
     Fit a model using the given training data and labels while validating each epoch.
     Save the model only when it performs better than the current val_loss. Weights can
@@ -168,7 +161,7 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
         Batch size for training network.
     epochs : int, optional
         Number of maximum epochs to train for. Model will stop at an earlier epoch
-        if val_loss does not improve after 15 epochs.
+        if val_loss does not improve after 20 epochs.
     """
 
     # define loss for classification and regression and weight each loss
@@ -178,7 +171,7 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
 
     # compile model and optimize using Adam
     model.compile(loss=loss_dict, loss_weights=loss_weights_dict,
-                    optimizer='adam', metrics=['accuracy'])
+                    optimizer='adam', metrics={'class':'accuracy'})
 
     # save model with lowest validation loss
     loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)
@@ -186,8 +179,8 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
     # cut learning rate in half if validation loss doesn't improve in 5 epochs
     reduce_lr_callback = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, verbose=1)
 
-    # stop training if validation loss doesn't improve after 15 epochs
-    early_stop_callback = EarlyStopping(monitor='val_loss', patience=15, verbose=1)
+    # stop training if validation loss doesn't improve after 20 epochs
+    early_stop_callback = EarlyStopping(monitor='val_loss', patience=20, verbose=1)
 
     model.fit(x=train_ftdata, y={'class': train_labels, 'slope': train_slopes},
             validation_data=(val_ftdata, {'class': val_labels, 'slope': val_slopes}),

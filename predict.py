@@ -155,8 +155,9 @@ def find_signals(wt_loader, model, bins_per_array=1024, f_shift=None, threshold=
 
     # predict class and drift rate with model
     print("Predicting with model...")
-    pred_test, slopes_test = model.predict(ftdata_test, verbose=1)
-    pred_test, slopes_test = pred_test.flatten(), slopes_test.flatten()
+    merged_preds = model.predict(ftdata_test, verbose=1)
+    pred_test, slopes_test = merged_preds[:, 0], merged_preds[:, 1]
+    # pred_test, slopes_test = pred_test.flatten(), slopes_test.flatten()
 
     voted_signal_probs = pred_test > threshold # mask for arrays that were deemed true signals
 
@@ -251,7 +252,7 @@ if __name__ == "__main__":
     nbytes_per_part = nbytes_max / 2 # half of memory for current array, other half for array waiting on queue
 
     # load model and display summary
-    model = load_model(model_name, compile=True)
+    model = load_model(model_name, compile=False)
     print(model.summary())
 
     # get fil/h5 file header

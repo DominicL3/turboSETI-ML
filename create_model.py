@@ -23,7 +23,6 @@ if validation loss doesn't improve after a certain number of epochs.
 Takes in a .fil file to use as background RFI and uses setigen to simulate
 narrowband signals with randomly generated signal properties.
 
-@source Liam Connor (https://github.com/liamconnor/single_pulse_ml)
 @source Bryan Brzycki (https://github.com/bbrzycki/setigen)
 """
 
@@ -311,7 +310,7 @@ if __name__ == "__main__":
 
     # load the best model saved to generate confusion matrix
     print("Evaluating on validation set to generate confusion matrix...")
-    model = load_model(saved_model_name, compile=True)
+    model = load_model(saved_model_name, compile=False)
     pred_probs = model.predict(val_ftdata, verbose=1)[0].flatten()
 
     utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs, args.confusion_matrix)
