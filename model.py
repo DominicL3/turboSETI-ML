@@ -33,14 +33,14 @@ def build_CNN(input_layer, num_conv_layers=2, num_filters=32):
         cnn_2d = Conv2D(num_filters, (3, 3), padding='same')(cnn_2d)
         cnn_2d = BatchNormalization()(cnn_2d)
         cnn_2d = Activation('relu')(cnn_2d)
-        # cnn_2d = MaxPooling2D(pool_size=(2, 2))(cnn_2d)
+        cnn_2d = MaxPooling2D(pool_size=(2, 2))(cnn_2d)
 
     # max pool all feature maps
     cnn_2d = GlobalMaxPooling2D()(cnn_2d)
 
     return cnn_2d
 
-def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
+def build_FC(cnn_2d, n_dense1=256, n_dense2=128):
     """
     Build the fully-connected layers. One branch of FC layers uses the
     feature maps to predict the class of the input, the other branch of FC layers
@@ -51,9 +51,7 @@ def build_FC(cnn_2d, inputs, n_dense1=256, n_dense2=128):
     ----------
     cnn_2d : Keras tensor
         Input Keras CNN tensor (output of CNN layers). Feature maps are used
-        as inputs to the fully-connected layers.
-    inputs : list
-        List of Keras inputs to feed to fully-connected layers.
+        as inputs to the fully-connected layers.s
     n_dense1 : int
         Number of neurons in first hidden layer.
     n_dense2 : int
@@ -118,13 +116,13 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
         cnn_2d = build_CNN(input_layer, num_conv_layers, num_filters)
 
         # predict what the class label should be
-        class_branch = build_FC(cnn_2d, input_layer, n_dense1, n_dense2)
+        class_branch = build_FC(cnn_2d, n_dense1, n_dense2)
         class_branch = Dense(1, activation='sigmoid', name='class')(class_branch)
 
         # predict SLOPE with input image AND predicted class (drift rate calculated later)
         # network doesn't have access to channel bandwidth and sampling time
         # double the number of hidden neurons since drift rate is harder to predict than class
-        slope_branch = build_FC(cnn_2d, [input_layer, class_branch], n_dense1*2, n_dense2*2)
+        slope_branch = build_FC(cnn_2d, n_dense1*2, n_dense2*2)
         slope_branch = Dense(1, activation='linear', name='slope')(slope_branch)
 
         model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
@@ -133,7 +131,7 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
 
 def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
                 train_slopes, val_slopes, saved_model_name='best_model.h5',
-                weight_signal=1.0, classification_loss_weight=1e5, batch_size=32, epochs=32):
+                weight_signal=1.0, classification_loss_weight=1000, batch_size=32, epochs=32):
     """
     Fit a model using the given training data and labels while validating each epoch.
     Save the model only when it performs better than the current val_loss. Weights can
@@ -173,7 +171,7 @@ def fit_model(model, train_ftdata, train_labels, val_ftdata, val_labels,
 
     # compile model and optimize using Adam
     model.compile(loss=loss_dict, loss_weights=loss_weights_dict,
-                    optimizer='adam', metrics={'class':'accuracy', 'slope': 'mean_absolute_percentage_error'})
+                    optimizer='adam', metrics={'class':'accuracy'})
 
     # save model with lowest validation loss
     loss_callback = ModelCheckpoint(saved_model_name, monitor='val_loss', verbose=1, save_best_only=True)

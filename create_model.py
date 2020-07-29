@@ -23,7 +23,6 @@ if validation loss doesn't improve after a certain number of epochs.
 Takes in a .fil file to use as background RFI and uses setigen to simulate
 narrowband signals with randomly generated signal properties.
 
-@source Liam Connor (https://github.com/liamconnor/single_pulse_ml)
 @source Bryan Brzycki (https://github.com/bbrzycki/setigen)
 """
 
