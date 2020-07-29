@@ -316,4 +316,4 @@ if __name__ == "__main__":
 
     utils.plot_confusion_matrix(val_ftdata, val_labels, pred_probs, args.confusion_matrix)
 
-    print(f"\nGenerating training set + training model + evaluating predictions: {(time() - script_start_time) / 60:.2f} minutes")j
+    print(f"\nGenerating training set + training model + evaluating predictions: {(time() - script_start_time) / 60:.2f} minutes")
