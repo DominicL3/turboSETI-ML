@@ -16,7 +16,7 @@ from waterfall_loader import ThreadedWaterfallLoader
 import gc # garbage collect every now and then
 import multiprocessing as mp
 
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import load_model, Model
 import utils
 
 # used for reading in h5 files
@@ -155,9 +155,8 @@ def find_signals(wt_loader, model, bins_per_array=1024, f_shift=None, threshold=
 
     # predict class and drift rate with model
     print("Predicting with model...")
-    merged_preds = model.predict(ftdata_test, verbose=1)
-    pred_test, slopes_test = merged_preds[:, 0], merged_preds[:, 1]
-    # pred_test, slopes_test = pred_test.flatten(), slopes_test.flatten()
+    pred_test, slopes_test = model.predict(ftdata_test, verbose=1)
+    pred_test, slopes_test = pred_test.flatten(), slopes_test.flatten()
 
     voted_signal_probs = pred_test > threshold # mask for arrays that were deemed true signals
 
