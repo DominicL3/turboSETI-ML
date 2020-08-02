@@ -37,6 +37,10 @@ def prep_batch_for_prediction(data, enable_numba=True):
     else:
         utils.scale_data(data)
 
+    # zero pad array when max pooling may remove all dimensions
+    if data.shape[1] < 16:
+        data = utils.zero_pad_array(data)
+
     data = data[..., None]
     return data
 
