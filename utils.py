@@ -118,6 +118,12 @@ def scale_data_numba(ftdata):
 
         ftdata[chunk_idx] = rescaled_chunk
 
+def zero_pad_array(ftdata):
+    # add padding around array for max pooling
+    amount_to_pad = np.max([(16 - ftdata.shape[1]) // 2, 1])
+    padded_array = np.pad(ftdata, ((0, 0), (amount_to_pad, amount_to_pad), (0, 0)), 'constant')
+    return padded_array
+
 def get_classification_results(y_true, y_pred):
     """ Take true labels (y_true) and model-predicted
     label (y_pred) for a binary classifier, and return

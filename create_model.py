@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
     ### MODEL PARAMETERS ###
     # parameters for convolutional layers
-    parser.add_argument('-conv', '--num_conv_layers', type=int, default=2, help='Number of convolutional layers to train with.')
+    parser.add_argument('-conv', '--num_conv_layers', type=int, default=4, help='Number of convolutional layers to train with.')
     parser.add_argument('-filt', '--num_filters', type=int, default=32,
                         help='Number of filters in starting convolutional layer, doubles with every convolutional block')
 
