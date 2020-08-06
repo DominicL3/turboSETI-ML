@@ -113,16 +113,17 @@ def construct_model(num_conv_layers=2, num_filters=32, n_dense1=256, n_dense2=12
         input_layer = Input(shape=(None, None, 1))
 
         # create convolutional feature extraction layers
-        cnn_2d = build_CNN(input_layer, num_conv_layers, num_filters)
+        cnn_2d_class = build_CNN(input_layer, num_conv_layers, num_filters)
+        cnn_2d_slope = build_CNN(input_layer, num_conv_layers, num_filters)
 
         # predict what the class label should be
-        class_branch = build_FC(cnn_2d, n_dense1, n_dense2)
+        class_branch = build_FC(cnn_2d_class, n_dense1, n_dense2)
         class_branch = Dense(1, activation='sigmoid', name='class')(class_branch)
 
         # predict SLOPE with input image AND predicted class (drift rate calculated later)
         # network doesn't have access to channel bandwidth and sampling time
         # double the number of hidden neurons since drift rate is harder to predict than class
-        slope_branch = build_FC(cnn_2d, n_dense1*2, n_dense2*2)
+        slope_branch = build_FC(cnn_2d_slope, n_dense1*2, n_dense2*2)
         slope_branch = Dense(1, activation='linear', name='slope')(slope_branch)
 
         model = Model(inputs=input_layer, outputs=[class_branch, slope_branch], name=saved_model_name)
