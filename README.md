@@ -7,7 +7,7 @@ The search for aliens is hard, but **Breakthrough Listen** is taking a crack at 
 One of the primary tools built for this purpose is `turboSETI` (https://github.com/UCBerkeleySETI/turbo_seti), which searches for narrowband drifting signals in frequency-time data gathered by radio telescopes. These signals typically span only a few Hz, but persist longer in time. Signals that originate far from Earth should exhibit a property known as Doppler drift, where the frequency of the signal appears to "drift" over time; the farther the signal source, the larger the drift rate. One example plot of narrowband signals discovered by `turboSETI` can be found below.
 
 <p align="center">
-    <img src="paper_plots/abacad_observation.png" height="500">
+    <img src="paper_plots/abacad_observation.png" height="650">
 </p>
 
 This would be an ideal detection, as the signal is present only in the ON observations (first, third, and fifth arrays) when the telescope is pointed _at_ the source, and not present when the telescope is pointed _away_ from the source.
@@ -44,7 +44,7 @@ This can be done with the following code:
 python3 generate_dataset.py /mnt_blpd12/datax/GC/AGBT19B_999_06/*0000.fil -total 100000 -spf 1000 -fs 17e6 -max_time 3600 --save_name train_params.npz
 ```
 
-This code takes samples all files matching the pattern `/mnt_blpd12/datax/GC/AGBT19B_999_06/*0000.fil`. It will take a total of 100,000 means, stddevs, and mins from the files, grabbing 1000 samples from each file in the path. The final `.npz` is saved to `train_params.npz`.
+This code takes samples all files matching the pattern `/mnt_blpd12/datax/GC/AGBT19B_999_06/*0000.fil`. It will take a total of 100,000 means, stddevs, and mins from the files, grabbing 1000 samples from each file in the path. Sampled arrays are separated by 17 million frequency channels, set by the `-fs` flag. The final `.npz` is saved to `train_params.npz`.
 
 **NOTE:** The program will **duplicate** the sampled parameters until there are `-total` samples if one of the following conditions is met:
 
