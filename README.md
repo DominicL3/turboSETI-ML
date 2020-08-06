@@ -7,7 +7,7 @@ The search for aliens is hard, but **Breakthrough Listen** is taking a crack at 
 One of the primary tools built for this purpose is `turboSETI` (https://github.com/UCBerkeleySETI/turbo_seti), which searches for narrowband drifting signals in frequency-time data gathered by radio telescopes. These signals typically span only a few Hz, but persist longer in time. Signals that originate far from Earth should exhibit a property known as Doppler drift, where the frequency of the signal appears to "drift" over time; the farther the signal source, the larger the drift rate. One example plot of narrowband signals discovered by `turboSETI` can be found below.
 
 <p align="center">
-    <img src="paper_plots/abacad_observation.png">
+    <img src="paper_plots/abacad_observation.png" height="50%">
 </p>
 
 This would be an ideal detection, as the signal is present only in the ON observations (first, third, and fifth arrays) when the telescope is pointed _at_ the source, and not present when the telescope is pointed _away_ from the source.
