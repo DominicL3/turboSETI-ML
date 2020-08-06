@@ -7,9 +7,9 @@
 *.ipynb
 *.h5
 scratch_space
-*.png
 *.yml
 
 # don't ignore these files
 !alienhuntmode_env.yml
-!voyager-NN-demo.ipynb
+!paper_plots
+voyager-NN-demo.ipynb
