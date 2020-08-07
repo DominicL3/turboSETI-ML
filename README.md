@@ -61,13 +61,13 @@ For every sample, the program takes a parameter and simulates one noisy array, l
 Below is what would a noisy background with _no signal_ would look like.
 
 <p align="center">
-    <img src="paper_plots/choppy_rfi.png" width="250">
+    <img src="paper_plots/choppy_rfi.png" width="600">
 </p>
 
 And here's the same noise with an injected signal.
 
 <p align="center">
-    <img src="paper_plots/signal.png" width="250">
+    <img src="paper_plots/signal.png" width="600">
 </p>
 
 You can choose various neural network parameters, such as the number of convolutional layers, via flags like `-conv`. You can also change the shape of the simulated array with `--fchans` (columns = frequency channels) and `--tchans` (rows = time channels). Many other controllable parameters are listed when running `--help`.
@@ -89,7 +89,7 @@ The best model, the one that minmizes validation loss, is saved to `best_model.h
 A confusion matrix is optionally saved to `best_confusion_matrix.png`, showing the lowest confidence predictions for each category (True Positive, False Positive, True Negative, False Negative), or a blank array if there were no arrays from the validation set that ended up in the category. If applicable, there should be signals in the True Positive and False Negative positions, and conversely, no signals in the False Positive and True Negative positions.
 
 <p align="center">
-    <img src="paper_plots/confusion_matrx.png" width="300">
+    <img src="paper_plots/confusion_matrix.png" width="700">
 </p>
 
 In the confusion matrix above, the lack of any image of the False Positive (FP) area means there were no arrays in the validation set that the model thought contained a signal when it actually didn't. The signal in the True Positive (TP) area is very faint, which makes sense that the model predicted it as containing a signal with low confidence. Can you spot the signal in the False Negative (FN) array?
