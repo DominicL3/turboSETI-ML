@@ -127,7 +127,7 @@ As of writing, the model is not perfect. Here are some examples it missed:
     <img src="paper_plots/missed_by_ML.png" width="800">
 </p>
 
-However, it __does__ catch some signals that `turboSETI` doesn't find, possibly due to restricted SNR or drift rate search parameters.
+However, it _does_ catch some signals that `turboSETI` doesn't find, possibly due to restricted SNR or drift rate search parameters.
 
 <p align="center">
     <img src="paper_plots/missed_by_turbo.png" width="800">
@@ -149,7 +149,7 @@ While this is certainly looking promising, there are still many things that can 
 - Rewrite `multiprocessing` code to consume less memory when predicting.
 - Stretch goal: use model to predict on ABACAD observations and use predictions from multiple observations to determine whether there exists a true signal coming from the source (and not just RFI).
 
----
-
-## References
-`turboSETI`: Enriquez, E., & Price, D. 2019, ascl, ascl (https://github.com/UCBerkeleySETI/turbo_seti)
+## Acknowledgments
+- Vishal Gajjar, for amazing mentorship
+- Bryan Brzycki, for his work on `setigen`
+- Breakthrough Listen, for a wonderful undergraduate research experience
