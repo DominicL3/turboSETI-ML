@@ -94,9 +94,35 @@ A confusion matrix is optionally saved to `best_confusion_matrix.png`, showing t
 
 In the confusion matrix above, the lack of any image in the False Positive (FP) area and `FP: 0` at the top of the subplot indicate there were no arrays in the validation set that the model thought contained a signal when it actually didn't. The signal in the True Positive (TP) area is very faint, which makes sense that the model predicted it as containing a signal with low confidence. Can you spot the signal in the False Negative (FN) array?
 
+Multiple cores are supported, and encouraged when possible, to simulate the training set. This is set by `-cores <num_cores>`, which in this instance is allowing 4 cores to run in parallel when creating the training data.
+
 Once the model has been trained, we can move on to finding new signals!
 
 ### Prediction
+
+Prediction requires two paths, one to the candidate file and the other to the model file. From there, we can save a CSV file containing the frequencies of model-predicted signals usin the `-csv` flag. Since some filterbank files, especially fine-resolution files, are exceptionally large (over 100 GB!), it's important to set the maximum amount of memory that can be used to load in a file at once (default 1GB).
+
+Example usage of `predict.py` can be found below:
+
+```
+python3 predict.py /mnt_blpd12/datax/GC/AGBT19B_999_06/spliced_blc00010203040506o7o0111213141516o7o0212223242526o7o031323334353637_guppi_58705_13293_BLGCsurvey_Cband_C10_0057.gpuspec.0000.fil best_model.h5 -mem 20 -csv GBT_58705_14221_predictions.csv -cores 10
+```
+
+In the above command, we let our previously trained model, `best_model.h5`, run through the filterbank file 20 GB at a time, as set by `-mem 20`. Predictions are then saved to `GBT_58705_14221_predictions.csv`.
+
+Like `create_model.py`, it is highly encouraged to use multiple cores whenever possible, again set by the `-cores` flag, but the defaut is to use a single core. In instances with many detected signals, computing drift rates on one core takes exceedingly long, thus bottlenecking the whole prediction script.
+
+The following are __real__ signals detected by the model.
+
+<p align="center">
+    <img src="paper_plots/GBT_13293_highDriftML.png" width="700">
+</p>
+
+---
+## Future Work
+- Pass in multiple files to predict in parallel. Would be especially good for Parkes multibeam data.
+- Refine model to work better variable-shaped images arrays.
+- Rewrite `multiprocessing` code to consume less memory when predicting.
 ---
 ## References
 `turboSETI`: Enriquez, E., & Price, D. 2019, ascl, ascl (https://github.com/UCBerkeleySETI/turbo_seti)
