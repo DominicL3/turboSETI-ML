@@ -230,7 +230,7 @@ if __name__ == "__main__":
                         help='Number of frequency channels from start of current frame to begin successive frame. If None, default to no overlap, i.e. f_shift=fchans).')
 
     parser.add_argument('-p', '--thresh', type=float, default=0.5, help='Threshold probability to admit whether example is FRB or RFI.')
-    parser.add_argument('-cores', '--num_cores', type=int, default=os.cpu_count(),
+    parser.add_argument('-cores', '--num_cores', type=int, default=0,
                         help='Number of cores to use for multiprocessing. Defaults to using all available processors. Set to 0 to disable.')
     parser.add_argument('--disable_numba', dest='enable_numba', action='store_false', help='Disable numba speed optimizations')
 
