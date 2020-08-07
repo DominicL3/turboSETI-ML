@@ -67,7 +67,7 @@ Below is what would a noisy background with _no signal_ would look like.
 And here's the same noise with an injected signal.
 
 <p align="center">
-    <img src="paper_plots/signal.png" height="300">
+    <img src="paper_plots/signal.png" height="200">
 </p>
 
 You can choose various neural network parameters, such as the number of convolutional layers, via flags like `-conv`. You can also change the shape of the simulated array with `--fchans` (columns = frequency channels) and `--tchans` (rows = time channels). Many other controllable parameters are listed when running `--help`.
