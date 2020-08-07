@@ -158,12 +158,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     ### SETIGEN FRAME PARAMETERS ###
-    parser.add_argument('-p', '--path_to_files', nargs='+', type=str,
-                        help='Regex pattern of matching .fil or .h5 names. Example: ./*0000.fil')
-
     parser.add_argument('-samp', '--num_samples', type=int, default=1000, help='Total number of samples to generate')
-    parser.add_argument('-spf', '--samples_per_file', type=int, default=50,
-                        help='Number of training samples to extract from each filterbank file')
 
     # control number of freq/time channels from each array.
     # Default value of None means entire time integration is used.
@@ -171,15 +166,10 @@ if __name__ == "__main__":
                         help='Number of frequency channels to extract for each training sample')
     parser.add_argument('-t', '--tchans', type=int, default=16,
                         help='Number of time bins to extract for each training sample. If None, use entire integration time')
-    parser.add_argument('-fs', '--f_shift', type=float, default=None,
-                        help='Number of frequency channels to extract for each training sample')
     parser.add_argument('-df', '--bandwidth', type=float, default=2.8, help='Frequency bandwidth; i.e. Hz per channel for simulated arrays.')
     parser.add_argument('-dt', '--sampling_time', type=float, default=18, help='Sampling time; number of seconds between bins for simulated arrays.')
     parser.add_argument('-fmin', '--min_freq', type=float, default=4e9, help='Minimum frequency (Hz) for simulated arrays.')
     parser.add_argument('-fmax', '--max_freq', type=float, default=8e9, help='Maximum frequency (Hz) for simulated arrays.')
-
-    parser.add_argument('-max_time', '--max_sampling_time', type=int, default=600,
-                        help='Max amount of time (seconds) to sample from files before duplicating')
 
     ### SIGNAL PARAMETERS (SNR, width, drift rate, etc.) ###
     # parameters for signal-to-noise ratio of FRB
@@ -247,22 +237,10 @@ if __name__ == "__main__":
 
     script_start_time = time() # time how long script takes to run
 
-    if prev_training_set: # override -p argument if loading in training set
-        print(f"Loading in previously created training set: {prev_training_set}\n")
-        training_params = np.load(prev_training_set, allow_pickle=True)
-        means, stddevs, mins = training_params['means'], training_params['stddevs'], training_params['mins']
-    else:
-        if path_to_files is None:
-            raise ValueError("-p (path_to_files) must be specified when creating training set from scratch")
 
-        print("Creating training set from scratch...\n")
-        means, stddevs, mins = generate_dataset.main(path_to_files, fchans, tchans, f_shift,
-                                            samples_per_file, num_samples, max_sampling_time)
-
-        if training_set_name:
-            # save final array to disk
-            print("Saving training set to " + training_set_name)
-            np.savez(training_set_name, means=means, stddevs=stddevs, mins=mins)
+    print(f"Loading in previously created training set: {prev_training_set}\n")
+    training_params = np.load(prev_training_set, allow_pickle=True)
+    means, stddevs, mins = training_params['means'], training_params['stddevs'], training_params['mins']
 
     print(f'Number of frequency channels per sample: {fchans}')
     print(f'Number of time bins per sample: {tchans}')
