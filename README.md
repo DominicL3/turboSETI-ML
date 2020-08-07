@@ -133,7 +133,7 @@ However, it __does__ catch some signals that `turboSETI` doesn't find, possibly 
 Of the signals that were detected by both methods, our ML model and regression methods perform a remarkable job in predicting drift rates. The histograms below show the differences in predicted drift rates.
 
 <p align="center">
-    <img src="paper_plots/drift_comparison_addRFI_v2.png" width="650">
+    <img src="paper_plots/drift_comparison_addRFI_v2.png" width="780">
 </p>
 
 Best of all, while this file takes `turboSETI` over 9 hours to analyze, our ML-based method finishes in a little over **30 minutes**!
