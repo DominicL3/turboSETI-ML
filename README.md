@@ -112,6 +112,11 @@ In the above command, we let our previously trained model, `best_model.h5`, run 
 
 Like `create_model.py`, it is highly encouraged to use multiple cores whenever possible, again set by the `-cores` flag, but the defaut is to use a single core. In instances with many detected signals, computing drift rates on one core takes exceedingly long, thus bottlenecking the whole prediction script.
 
+Again, more options can be accessed via the `--help` flag.
+
+---
+
+## Results
 The following are __real__ signals detected by the model!
 
 <p align="center">
