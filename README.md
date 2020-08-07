@@ -115,7 +115,7 @@ Like `create_model.py`, it is highly encouraged to use multiple cores whenever p
 The following are __real__ signals detected by the model.
 
 <p align="center">
-    <img src="paper_plots/GBT_13293_highDriftML.png" width="700">
+    <img src="paper_plots/GBT_13293_highDriftML.png" width="800">
 </p>
 
 ---
