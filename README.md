@@ -114,8 +114,6 @@ Like `create_model.py`, it is highly encouraged to use multiple cores whenever p
 
 Again, more options can be accessed via the `--help` flag.
 
----
-
 ## Results
 The following are __real__ signals detected by the model!
 
@@ -142,8 +140,6 @@ Of the signals that were detected by both methods, our ML model and regression m
 </p>
 
 Best of all, while this file takes `turboSETI` over 9 hours to analyze, our ML-based method finishes in a little over **30 minutes**!
-
----
 
 ## Future Work
 While this is certainly looking promising, there are still many things that can be improved.
