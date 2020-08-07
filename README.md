@@ -112,17 +112,43 @@ In the above command, we let our previously trained model, `best_model.h5`, run 
 
 Like `create_model.py`, it is highly encouraged to use multiple cores whenever possible, again set by the `-cores` flag, but the defaut is to use a single core. In instances with many detected signals, computing drift rates on one core takes exceedingly long, thus bottlenecking the whole prediction script.
 
-The following are __real__ signals detected by the model.
+The following are __real__ signals detected by the model!
 
 <p align="center">
     <img src="paper_plots/GBT_13293_highDriftML.png" width="800">
 </p>
 
+As of writing, the model is not perfect. Here are some examples it missed:
+
+<p align="center">
+    <img src="paper_plots/missed_by_ML.png" width="800">
+</p>
+
+However, it __does__ catch some signals that `turboSETI` doesn't find, possibly due to restricted SNR or drift rate search parameters.
+
+<p align="center">
+    <img src="paper_plots/missed_by_turbo.png" width="800">
+</p>
+
+Of the signals that were detected by both methods, our ML model and regression methods perform a remarkable job in predicting drift rates. The histograms below show the differences in predicted drift rates.
+
+<p align="center">
+    <img src="paper_plots/drift_comparison_addRFI_v2.png" width="650">
+</p>
+
+Best of all, while this file takes `turboSETI` over 9 hours to analyze, our ML-based method finishes in a little over **30 minutes**!
+
 ---
+
 ## Future Work
+While this is certainly looking promising, there are still many things that can be improved.
+
 - Pass in multiple files to predict in parallel. Would be especially good for Parkes multibeam data.
 - Refine model to work better variable-shaped images arrays.
 - Rewrite `multiprocessing` code to consume less memory when predicting.
+- Stretch goal: use model to predict on ABACAD observations and use predictions from multiple observations to determine whether there exists a true signal coming from the source (and not just RFI).
+
 ---
+
 ## References
 `turboSETI`: Enriquez, E., & Price, D. 2019, ascl, ascl (https://github.com/UCBerkeleySETI/turbo_seti)
