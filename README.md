@@ -114,6 +114,8 @@ Like `create_model.py`, it is highly encouraged to use multiple cores whenever p
 
 Again, more options can be accessed via the `--help` flag.
 
+/% Write in what the csv file looks like and how to interpret it.
+
 ## Results
 The following are __real__ signals detected by the model!
 
